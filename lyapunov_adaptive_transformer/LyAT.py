@@ -551,31 +551,31 @@ class Simulation:
 def main ():
     torch.manual_seed(42)
     np.random.seed(42)
-    
-    config = {
-        "n_states": 5,
-        "window_size": 10,
-        "T_final": 10.0,
-        "dt": 0.005,
-        "ke": 100.0,
-        "gamma": 1,
-        "sigma": 0.001,
-        "theta_bar": 100.0,
-        "num_encoder_layers": 2,
-        "num_decoder_layers": 2,
-        "num_heads": 5,
-        "d_ff": 128,
-        "gamma_encoder_attn": 1.0,
-        "beta_encoder_attn": 0.0,
-        "gamma_encoder_ff": 1.0,
-        "beta_encoder_ff": 0.0,
-        "gamma_decoder_self": 1.0,
-        "beta_decoder_self": 0.0,
-        "gamma_decoder_cross": 1.0,
-        "beta_decoder_cross": 0.0,
-        "gamma_decoder_ff": 1.0,
-        "beta_decoder_ff": 0.0
-    }
+    with open('lyapunov_adaptive_transformer/lyapunov_adaptive_transformer/config.json', 'r') as config_file: config = json.load(config_file)
+    # config = {
+    #     "n_states": 5,
+    #     "window_size": 10,
+    #     "T_final": 10.0,
+    #     "dt": 0.005,
+    #     "ke": 100.0,
+    #     "gamma": 1,
+    #     "sigma": 0.001,
+    #     "theta_bar": 100.0,
+    #     "num_encoder_layers": 2,
+    #     "num_decoder_layers": 2,
+    #     "num_heads": 5,
+    #     "d_ff": 128,
+    #     "gamma_encoder_attn": 1.0,
+    #     "beta_encoder_attn": 0.0,
+    #     "gamma_encoder_ff": 1.0,
+    #     "beta_encoder_ff": 0.0,
+    #     "gamma_decoder_self": 1.0,
+    #     "beta_decoder_self": 0.0,
+    #     "gamma_decoder_cross": 1.0,
+    #     "beta_decoder_cross": 0.0,
+    #     "gamma_decoder_ff": 1.0,
+    #     "beta_decoder_ff": 0.0
+    # }
 
     # Save config
     with open('config_LyAT.json', 'w') as f:

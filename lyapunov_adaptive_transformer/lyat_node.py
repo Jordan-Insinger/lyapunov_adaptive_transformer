@@ -5,7 +5,6 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 import math
 from geodesy import utm
-# import utm
 import geodesy
 import tf2_ros
 from tf2_ros import TransformBroadcaster
@@ -23,13 +22,17 @@ import traceback
 import asyncio
 import json
 from sensor_msgs.msg import Joy
+import torch
 
+# import LyAT funcs
+from . import LyAT
 
 class LyapunovAdaptiveTransformer(Node):
     def __init__(self):
         # Initialize ROS node
         super().__init__('lyapunov_adaptive_transformer')
 
+        self.initialize_lyat()
 
         # Load park parameters for coordinate transforms
         self.declare_parameters(
@@ -109,6 +112,18 @@ class LyapunovAdaptiveTransformer(Node):
 
        
         self.get_logger().info("Lyapunov Adaptive Transformer Node Initialized")
+
+    def initialize_lyat(self):
+         # Load configuration file for simulation
+        with open('lyapunov_adaptive_transformer/lyapunov_adaptive_transformer/config.json', 'r') as config_file: config = json.load(config_file)
+        self.n_states = config['n_states']
+        self.tf = config['T_final']
+        self.dt = config['dt']
+        self.time_steps = int(self.tf / self.dt)
+        
+        self.dynamics = LyAT.Dynamics()
+        self.desired_trajectory = self.dynamics.desired_trajectory(torch.tensor(1))
+        
 
      # ==================== CALLBACK METHODS ====================
     
@@ -257,6 +272,9 @@ class LyapunovAdaptiveTransformer(Node):
 
     
     def compute_control_input(self):
+        # u = LyAT.getInput(self.state, t)
+        # u: <ax, ay, ax>
+        
         return
        
 
@@ -395,35 +413,50 @@ class LyapunovAdaptiveTransformer(Node):
         """Run the main control loop following a trajectory"""
         self.get_logger().info("Starting trajectory tracking...")
         
-        traj_start_time = self.get_clock().now()
+        #traj_start_time = self.get_clock().now()
         
-        while rclpy.ok():
-            try:
-                # Get elapsed time
-                t = (self.get_clock().now() - traj_start_time).nanoseconds / 1e9
-                
-                # Compute control input
-                u, yaw_command, yaw_rate_command = self.compute_control_input(t)
-                self.control_input = u
-                
-                # Ensure we have float values
-                ax = float(u[0])
-                ay = float(u[1])
-                az = float(u[2])
-                
-                # Send acceleration command
-                self.send_accel_command(ax, ay, az, yaw_command, yaw_rate_command)
+        controller = LyAT.LyAT_Controller(self.config)
+        tracking_errors = []
+        control_inputs = []
+        parameter_norms = []
+        # Compute control input
+        for step in range(1, self.time_steps):
+            t = step * self.dt
 
-                 # End Simulation
-                if t >= self.simulation_time:
-                    self.get_logger().info(f"{t} seconds elapsed, ending trajectory.")
-                    break
+            # Progress 
+            if step % 100 == 0:
+                progress = 100 * step / self.time_steps
+                theta = torch.cat([p.view(-1) for p in controller.transformer.parameters()])
+                param_norm = torch.norm(theta).item()
+                parameter_norms.append(param_norm) 
+                print(f"\rProgress: {progress:.1f}% | ||θ||: {param_norm:.2f}", end="", flush=True)
+
+            # TODO: CONVERT THIS LOGIC TO USE CURRENT PX4 STATES
+            # TODO: DESIRED STATES? HOW MANY STATES, 3?
+            #x = self.x[:, step - 1]
+            # xd, xd_dot = LyAT.Dynamics.desired_trajectory(torch.tensor(t, dtype=torch.float32))
+            # u, Phi = controller.parameter_adaptation(x, t)
+            # self.update_state(step, u, t)
+
+            # e = self.x[:, step] - xd
+            error_norm = torch.norm(e).item()
+            tracking_errors.append(error_norm)
+            control_inputs.append(torch.norm(u).item())
+
                 
-                await self.sleep(0.02)
-                
-            except Exception as e:
-                self.get_logger().error(f"Error in control loop: {e}")
-                self.get_logger().error(f"Error details: {type(e)}")
+        # Ensure we have float values
+        ax = float(u[0])
+        ay = float(u[1])
+        az = float(u[2])
+        
+        # Send acceleration command
+        self.send_accel_command(ax, ay, az)
+
+        # End Simulation
+        # if t >= self.tf:
+        #     self.get_logger().info(f"{t} seconds elapsed, ending trajectory.")
+        #     break      
+            
     
     async def land(self):
         """Simple landing procedure"""
