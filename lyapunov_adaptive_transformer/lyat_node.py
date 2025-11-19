@@ -132,7 +132,6 @@ class LyapunovAdaptiveTransformer(Node):
      # ==================== CALLBACK METHODS ====================
     
     def pose_callback(self, msg):
-        self.get_logger().info(f"Pose callback triggered: {self.position[0]}, {self.position[1]}, {self.position[2]}")
         # Pose updates (APark)
         self.position[0] = msg.pose.position.x
         self.position[1] = msg.pose.position.y
@@ -270,11 +269,49 @@ class LyapunovAdaptiveTransformer(Node):
                 np.array([ax_d, ay_d, az_d]))
 
     
-    def compute_control_input(self):
-        # u = LyAT.getInput(self.state, t)
-        # u: <ax, ay, ax>
+    def compute_control_input(self, t, controller):
+        x = torch.tensor([self.position[0], self.position[1], self.position[2],
+                                        self.velocity[0], self.velocity[1], self.velocity[2]],
+                                    dtype=torch.float32)
+
+        # Convert t to tensor before using it
+        t_tensor = torch.tensor(t, dtype=torch.float32)
+        self.get_logger().info(f"Time: {t_tensor.item()}")
+        xd, xd_dot = LyAT.Dynamics.desired_trajectory(t_tensor)
+        u, Phi = controller.parameter_adaptation(x, t_tensor)
+
+        # Data Storage
+        data_manager.save_state_to_csv(
+            self.step, 
+            t,  
+            x.detach().cpu().numpy(),
+            xd.detach().cpu().numpy(),
+            u.detach().cpu().numpy()
+        )
+        self.step = self.step + 0.01
+
+        # Broadcast tf for rViz
+        tf = TransformStamped()
+        # Set the timestamp and frame IDs
+        tf.header.stamp = self.get_clock().now().to_msg()
+        tf.header.frame_id = "autonomy_park"  # Parent frame
+        tf.child_frame_id = "target_position"  # Child frame
         
-        return
+        # Set the translation (position)
+        tf.transform.translation.x = xd[0].item()
+        tf.transform.translation.y = xd[1].item()
+        tf.transform.translation.z = xd[2].item()
+        
+        # Set the rotation (identity quaternion if no specific orientation)
+        tf.transform.rotation.x = 0.0
+        tf.transform.rotation.y = 0.0
+        tf.transform.rotation.z = 0.0
+        tf.transform.rotation.w = 1.0
+    
+        # Send the transform
+        self.tf_broadcaster.sendTransform(tf)
+        
+        return u
        
 
     def send_command(self, vel_x, vel_y, vel_z, yaw=None, yaw_rate=None):
@@ -410,15 +447,10 @@ class LyapunovAdaptiveTransformer(Node):
     
     async def run_trajectory(self):
         self.get_logger().info("Starting trajectory tracking...")
+        controller = LyAT.LyAT_Controller(self.config)
         
         traj_start_time = self.get_clock().now()
         
-        controller = LyAT.LyAT_Controller(self.config)
-        tracking_errors = []
-        control_inputs = []
-        
-        # Compute control input
-        # Progress
         while rclpy.ok(): 
             try:
                 t = (self.get_clock().now() - traj_start_time).nanoseconds / 1e9     
@@ -426,18 +458,8 @@ class LyapunovAdaptiveTransformer(Node):
                 if t > self.tf:
                     self.get_logger().info(f"Reached final time of {self.tf} seconds.")
                     break
-
-                x = torch.tensor([self.position[0], self.position[1], self.position[2],
-                                        self.velocity[0], self.velocity[1], self.velocity[2]],
-                                    dtype=torch.float32)
-                self.get_logger().info(f"position: {self.position[0]}, { self.position[1]}, {self.position[2]}")
-                # Convert t to tensor before using it
-                t_tensor = torch.tensor(t, dtype=torch.float32)
-
-                xd, xd_dot = LyAT.Dynamics.desired_trajectory(t_tensor)
-                u, Phi = controller.parameter_adaptation(x, t_tensor)
-
-                e = x - xd
+                
+                u = self.compute_control_input(t, controller)
 
                 # Ensure we have float values
                 vx = float(u[0])
@@ -446,18 +468,9 @@ class LyapunovAdaptiveTransformer(Node):
                 
                 # Send velocity command
                 self.send_command(vx, vy, vz, yaw=None, yaw_rate=None)
+                
 
-                # Data Storage
-                data_manager.save_state_to_csv(
-                    self.step, 
-                    t,  
-                    x.detach().cpu().numpy(),
-                    xd.detach().cpu().numpy(),
-                    u.detach().cpu().numpy()
-                )
-                self.step = self.step + 0.02
-
-                await self.sleep(0.02)
+                await self.sleep(0.01)
             
             except Exception as e:
                 self.get_logger().error(f"Error in control loop: {e}")
