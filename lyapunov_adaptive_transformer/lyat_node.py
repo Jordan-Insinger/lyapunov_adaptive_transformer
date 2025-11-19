@@ -5,6 +5,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 import math
 from geodesy import utm
+import utm
 import geodesy
 import tf2_ros
 from tf2_ros import TransformBroadcaster
@@ -115,10 +116,11 @@ class LyapunovAdaptiveTransformer(Node):
 
     def initialize_lyat(self):
          # Load configuration file for simulation
-        with open('lyapunov_adaptive_transformer/lyapunov_adaptive_transformer/config.json', 'r') as config_file: config = json.load(config_file)
-        self.n_states = config['n_states']
-        self.tf = config['T_final']
-        self.dt = config['dt']
+        with open('src/lyapunov_adaptive_transformer/lyapunov_adaptive_transformer/config.json', 'r') as config_file: config = json.load(config_file)
+        self.config = config
+        self.n_states = self.config['n_states']
+        self.tf = self.config['T_final']
+        self.dt = self.config['dt']
         self.time_steps = int(self.tf / self.dt)
         
         self.dynamics = LyAT.Dynamics()        
@@ -412,38 +414,38 @@ class LyapunovAdaptiveTransformer(Node):
         
         # Compute control input
         # Progress
-        while rclpy.OK(): 
-            try:
-                t = (self.get_clock().now() - traj_start_time).nanoseconds / 1e9     
+        while rclpy.ok(): 
+            # try:
+            t = (self.get_clock().now() - traj_start_time).nanoseconds / 1e9     
 
-                if t > self.tf:
-                    self.get_logger().info(f"Reached final time of {self.tf} seconds.")
-                    break
+            if t > self.tf:
+                self.get_logger().info(f"Reached final time of {self.tf} seconds.")
+                break
 
-                x = torch.tensor([self.position, self.velocity], dtype=torch.flat32)
+            x = torch.zeros((self.n_states, 1))
+            x[:, 0] = torch.tensor([self.position[0], self.position[1], self.position[2],
+                                    self.velocity[0], self.velocity[1], self.velocity[2]],
+                                dtype=torch.float32)
 
-                # -------------------------------------------------------------------- #
-                xd, xd_dot = LyAT.Dynamics.desired_trajectory(torch.tensor(t, dtype=torch.float32))
-                u, Phi = controller.parameter_adaptation(x, t)
-                # -------------------------------------------------------------------- #
+            # Convert t to tensor before using it
+            t_tensor = torch.tensor(t, dtype=torch.float32)
 
-                e = x - xd
-                error_norm = torch.norm(e).item()
-                tracking_errors.append(error_norm)
-                control_inputs.append(torch.norm(u).item())
+            xd, xd_dot = LyAT.Dynamics.desired_trajectory(t_tensor)
+            u, Phi = controller.parameter_adaptation(x, t_tensor)
 
+            e = x - xd
 
-                # Ensure we have float values
-                vx = float(u[0])
-                vy = float(u[1])
-                vz = float(u[2])
-                
-                # Send velocity command
-                self.send_command(vx, vy, vz, yaw=None, yaw_rate=None)
+            # Ensure we have float values
+            vx = float(u[0])
+            vy = float(u[1])
+            vz = float(u[2])
             
-            except Exception as e:
-                self.get_logger().error(f"Error in control loop: {e}")
-                self.get_logger().error(f"Error details: {type(e)}") 
+            # Send velocity command
+            self.send_command(vx, vy, vz, yaw=None, yaw_rate=None)
+            
+            # except Exception as e:
+            #     self.get_logger().error(f"Error in control loop: {e}")
+            #     self.get_logger().error(f"Error details: {type(e)}") 
         
 
 

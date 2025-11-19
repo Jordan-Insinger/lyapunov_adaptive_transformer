@@ -7,7 +7,7 @@ def generate_launch_description():
     return LaunchDescription([
         Node(
             package='lyapunov_adaptive_transformer',
-            namespace='astro1',
+            namespace='astro_sim',
             executable='lyapunov_adaptive_transformer',
             parameters=[os.path.join(get_package_share_directory('px4_telemetry'), 'param', 'park_coordinates.yaml')],
             name='lyapunov_adaptive_transformer_node'

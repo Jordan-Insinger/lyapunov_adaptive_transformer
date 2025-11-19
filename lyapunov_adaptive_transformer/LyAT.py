@@ -5,7 +5,7 @@ import math
 # import matplotlib.pyplot as plt
 import json
 import os
-
+import rclpy
 
 # ================== Dynamical System ====================== #
 class Dynamics:
@@ -56,28 +56,29 @@ class Dynamics:
     
     @staticmethod
     def desired_trajectory(t):
-        a = 5.0 # meters
-        b = 2.5 # meters
+        a = 5.0  # meters
+        b = 2.5  # meters
         height = 2.5  # meters
         omega = 0.2  # rad/s
-
+        
         # desired position (figure 8)
         xd1 = a * torch.sin(omega * t)
         xd2 = b * torch.sin(2 * omega * t)
-        xd3 = height
+        xd3 = torch.tensor(height, dtype=torch.float32)  # Convert to tensor
+        
         # desired velocity
         xd4 = a * omega * torch.cos(omega * t)
         xd5 = 2 * b * omega * torch.cos(2 * omega * t)
-        xd6 = 0.0
+        xd6 = torch.tensor(0.0, dtype=torch.float32)  # Convert to tensor
         
         # desired acceleration
         xd4_dot = -a * omega**2 * torch.sin(omega * t)
         xd5_dot = -4 * b * omega**2 * torch.sin(2 * omega * t)
-        xd6_dot = 0.0
+        xd6_dot = torch.tensor(0.0, dtype=torch.float32)  # Convert to tensor
         
         xd = torch.stack([xd1, xd2, xd3, xd4, xd5, xd6])
         xd_dot = torch.stack([xd4, xd5, xd6, xd4_dot, xd5_dot, xd6_dot])
-
+        
         return xd, xd_dot
 
 
@@ -215,7 +216,7 @@ class DecoderLayer (nn.Module):
     # ==================== Lyapunov-Based Adaptive Transformer ==============================##
 
 class LyAT (nn.Module):
-    def __init__ (self, n_states = 5, window_size = 10, num_encoder_layers = 2, num_decoder_layers = 2, num_heads = 5, d_ff = 128, 
+    def __init__ (self, n_states = 6, window_size = 10, num_encoder_layers = 2, num_decoder_layers = 2, num_heads = 6, d_ff = 128, 
                   # Encoder:
                   gamma_encoder_attn = 1.0, beta_encoder_attn = 0.0,
                   gamma_encoder_ff = 1.0, beta_encoder_ff = 0.0,

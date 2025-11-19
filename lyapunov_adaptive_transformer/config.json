@@ -9,7 +9,7 @@
     "theta_bar": 100.0,
     "num_encoder_layers": 2,
     "num_decoder_layers": 2,
-    "num_heads": 5,
+    "num_heads": 6,
     "d_ff": 128,
     "gamma_encoder_attn": 1.0,
     "beta_encoder_attn": 0.0,
