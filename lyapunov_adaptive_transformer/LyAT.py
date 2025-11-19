@@ -6,6 +6,14 @@ import math
 import json
 import os
 import rclpy
+import logging
+
+# Initialize logging
+logging.basicConfig(
+    filename='debug.log',
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # ================== Dynamical System ====================== #
 class Dynamics:
@@ -26,7 +34,7 @@ class Dynamics:
     
     @staticmethod
     def control_effectiveness ():
-        return torch.eye(5)
+        return torch.eye(6)
     
     @staticmethod
     def diffusion_matrix (x):
@@ -58,7 +66,7 @@ class Dynamics:
     def desired_trajectory(t):
         a = 5.0  # meters
         b = 2.5  # meters
-        height = 2.5  # meters
+        height = 8.0  # meters
         omega = 0.2  # rad/s
         
         # desired position (figure 8)
@@ -417,6 +425,8 @@ class LyAT_Controller:
 
     def parameter_adaptation (self, x, t):
         xd, xd_dot = Dynamics.desired_trajectory (torch.tensor(t, dtype = torch.float32))
+        # logging.debug(f"X: {x.shape}")
+        # logging.debug(f"Xd: {xd.shape}")
 
         e = x - xd
 
@@ -431,7 +441,19 @@ class LyAT_Controller:
 
         theta = torch.cat([p.view(-1) for p in self.transformer.parameters()])
 
+        # Log intermediate values for debugging
+    
+        # logging.debug(f"Jacobian shape: {jacobian.shape}")
+        logging.debug(f"Error vector (e): {e}")
+        # logging.debug(f"Theta: {theta.shape}")
+        # logging.debug(f"Gamma: {self.Gamma.shape}")
+        # logging.debug(f"Sigma: {self.sigma}")
+
         projected_term = self.Gamma @ (jacobian.T @ e - self.sigma * theta)
+
+        # Log the projected_term for debugging
+        logging.debug(f"Projected term: {projected_term}")
+
         projected = smooth_projection (projected_term, theta, self.theta_bar)
 
         theta_new = theta + projected * self.dt
@@ -450,6 +472,10 @@ class LyAT_Controller:
             
         g1 = Dynamics.control_effectiveness()
         g1_inv = torch.inverse(g1) 
+
+        # logging.debug(f"g1_inv: {g1_inv.shape}")
+        # logging.debug(f"xd_dot: {xd_dot.shape}")
+        # logging.debug(f"other terms: {(self.ke * e - Phi).shape}")
         u = g1_inv @ (xd_dot - self.ke * e - Phi)
         
         self.update_history(x, xd, e, Phi)

@@ -27,6 +27,7 @@ import torch
 
 # import LyAT funcs
 from . import LyAT
+from . import data_manager
 
 class LyapunovAdaptiveTransformer(Node):
     def __init__(self):
@@ -76,6 +77,9 @@ class LyapunovAdaptiveTransformer(Node):
         self.quaternion = None
         self.global_pose = NavSatFix()
         self.altitude_amsl = -1.0
+
+        # for logging/plotting
+        self.step = 1
  
 
         # State variables - mavros
@@ -128,6 +132,7 @@ class LyapunovAdaptiveTransformer(Node):
      # ==================== CALLBACK METHODS ====================
     
     def pose_callback(self, msg):
+        self.get_logger().info(f"Pose callback triggered: {self.position[0]}, {self.position[1]}, {self.position[2]}")
         # Pose updates (APark)
         self.position[0] = msg.pose.position.x
         self.position[1] = msg.pose.position.y
@@ -415,37 +420,48 @@ class LyapunovAdaptiveTransformer(Node):
         # Compute control input
         # Progress
         while rclpy.ok(): 
-            # try:
-            t = (self.get_clock().now() - traj_start_time).nanoseconds / 1e9     
+            try:
+                t = (self.get_clock().now() - traj_start_time).nanoseconds / 1e9     
 
-            if t > self.tf:
-                self.get_logger().info(f"Reached final time of {self.tf} seconds.")
-                break
+                if t > self.tf:
+                    self.get_logger().info(f"Reached final time of {self.tf} seconds.")
+                    break
 
-            x = torch.zeros((self.n_states, 1))
-            x[:, 0] = torch.tensor([self.position[0], self.position[1], self.position[2],
-                                    self.velocity[0], self.velocity[1], self.velocity[2]],
-                                dtype=torch.float32)
+                x = torch.tensor([self.position[0], self.position[1], self.position[2],
+                                        self.velocity[0], self.velocity[1], self.velocity[2]],
+                                    dtype=torch.float32)
+                self.get_logger().info(f"position: {self.position[0]}, { self.position[1]}, {self.position[2]}")
+                # Convert t to tensor before using it
+                t_tensor = torch.tensor(t, dtype=torch.float32)
 
-            # Convert t to tensor before using it
-            t_tensor = torch.tensor(t, dtype=torch.float32)
+                xd, xd_dot = LyAT.Dynamics.desired_trajectory(t_tensor)
+                u, Phi = controller.parameter_adaptation(x, t_tensor)
 
-            xd, xd_dot = LyAT.Dynamics.desired_trajectory(t_tensor)
-            u, Phi = controller.parameter_adaptation(x, t_tensor)
+                e = x - xd
 
-            e = x - xd
+                # Ensure we have float values
+                vx = float(u[0])
+                vy = float(u[1])
+                vz = float(u[2])
+                
+                # Send velocity command
+                self.send_command(vx, vy, vz, yaw=None, yaw_rate=None)
 
-            # Ensure we have float values
-            vx = float(u[0])
-            vy = float(u[1])
-            vz = float(u[2])
+                # Data Storage
+                data_manager.save_state_to_csv(
+                    self.step, 
+                    t,  
+                    x.detach().cpu().numpy(),
+                    xd.detach().cpu().numpy(),
+                    u.detach().cpu().numpy()
+                )
+                self.step = self.step + 0.02
+
+                await self.sleep(0.02)
             
-            # Send velocity command
-            self.send_command(vx, vy, vz, yaw=None, yaw_rate=None)
-            
-            # except Exception as e:
-            #     self.get_logger().error(f"Error in control loop: {e}")
-            #     self.get_logger().error(f"Error details: {type(e)}") 
+            except Exception as e:
+                self.get_logger().error(f"Error in control loop: {e}")
+                self.get_logger().error(f"Error details: {type(e)}") 
         
 
 
@@ -496,7 +512,7 @@ class LyapunovAdaptiveTransformer(Node):
                     await self.sleep(0.01)
                 
                 # Take off next
-                await self.takeoff(height=2.5)
+                await self.takeoff(height=8.0)
                 
                 # Set offboard mode after takeoff
                 await self.set_offboard()
