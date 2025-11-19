@@ -56,20 +56,27 @@ class Dynamics:
     
     @staticmethod
     def desired_trajectory(t):
-        xd1 = -torch.cos(2 * t) / 2
-        xd2 = -torch.sin(t)
-        xd3 = -torch.cos(3 * t) / 3 - torch.sin(2 * t) / 2
-        xd4 = -torch.cos(t) - 2 * torch.sin(0.5 * t)
-        xd5 = torch.cos(t)
-    
-        xd1_dot = torch.sin(2 * t)
-        xd2_dot = -torch.cos(t)
-        xd3_dot = torch.sin(3 * t) + torch.cos(-2 * t)
-        xd4_dot = torch.sin(t) - torch.cos(-0.5 * t)
-        xd5_dot = torch.sin(-t)
+        a = 5.0 # meters
+        b = 2.5 # meters
+        height = 2.5  # meters
+        omega = 0.2  # rad/s
+
+        # desired position (figure 8)
+        xd1 = a * torch.sin(omega * t)
+        xd2 = b * torch.sin(2 * omega * t)
+        xd3 = height
+        # desired velocity
+        xd4 = a * omega * torch.cos(omega * t)
+        xd5 = 2 * b * omega * torch.cos(2 * omega * t)
+        xd6 = 0.0
         
-        xd = torch.stack([xd1, xd2, xd3, xd4, xd5])
-        xd_dot = torch.stack([xd1_dot, xd2_dot, xd3_dot, xd4_dot, xd5_dot])
+        # desired acceleration
+        xd4_dot = -a * omega**2 * torch.sin(omega * t)
+        xd5_dot = -4 * b * omega**2 * torch.sin(2 * omega * t)
+        xd6_dot = 0.0
+        
+        xd = torch.stack([xd1, xd2, xd3, xd4, xd5, xd6])
+        xd_dot = torch.stack([xd4, xd5, xd6, xd4_dot, xd5_dot, xd6_dot])
 
         return xd, xd_dot
 

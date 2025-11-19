@@ -87,7 +87,7 @@ class LyapunovAdaptiveTransformer(Node):
         self.tf_broadcaster = TransformBroadcaster(self)
         
         # Publishers
-        self.accel_pub = self.create_publisher(PositionTarget, 'setpoint_raw/local', qos_profile=qos_profile_sensor_data)
+        self.vel_pub = self.create_publisher(PositionTarget, 'setpoint_raw/local', qos_profile=qos_profile_sensor_data)
         
         # Subscribers
         self.pose_sub = self.create_subscription(PoseStamped, 'autonomy_park/pose', self.pose_callback, qos_profile=qos_profile_sensor_data)
@@ -121,9 +121,7 @@ class LyapunovAdaptiveTransformer(Node):
         self.dt = config['dt']
         self.time_steps = int(self.tf / self.dt)
         
-        self.dynamics = LyAT.Dynamics()
-        self.desired_trajectory = self.dynamics.desired_trajectory(torch.tensor(1))
-        
+        self.dynamics = LyAT.Dynamics()        
 
      # ==================== CALLBACK METHODS ====================
     
@@ -187,7 +185,7 @@ class LyapunovAdaptiveTransformer(Node):
         #self.get_logger().info(f"ax: {joy_msg.acceleration_or_force.x}, ay: {joy_msg.acceleration_or_force.y}, az: {joy_msg.acceleration_or_force.z}")
 
         # Uncomment to enable direct joystick control
-        #self.accel_pub.publish(joy_msg)
+        #self.vel_pub.publish(joy_msg)
         
     def get_desired_state(self, t):
         # Common parameters
@@ -216,9 +214,6 @@ class LyapunovAdaptiveTransformer(Node):
             vx_d = -r * omega * np.sin(omega * t)
             vy_d = r * omega * np.cos(omega * t)
             
-            # Acceleration
-            ax_d = -r * omega**2 * np.cos(omega * t)
-            ay_d = -r * omega**2 * np.sin(omega * t)
             
         # Trajectory 3: Figure eight in x-direction
         elif self.trajectory == "figure8":
@@ -232,10 +227,7 @@ class LyapunovAdaptiveTransformer(Node):
             # Velocity
             vx_d = a * omega * np.cos(omega * t)
             vy_d = 2 * b * omega * np.cos(2 * omega * t)
-            
-            # Acceleration
-            ax_d = -a * omega**2 * np.sin(omega * t)
-            ay_d = -4 * b * omega**2 * np.sin(2 * omega * t)
+
         
         # Update states
         self.target_position[0] = x_d
@@ -278,8 +270,8 @@ class LyapunovAdaptiveTransformer(Node):
         return
        
 
-    def send_accel_command(self, accel_x, accel_y, accel_z, yaw=None, yaw_rate=None):
-        """Send acceleration and attitude command to PX4"""
+    def send_command(self, vel_x, vel_y, vel_z, yaw=None, yaw_rate=None):
+        """Send velocity and attitude command to PX4"""
         msg = PositionTarget()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = "base_link"
@@ -287,8 +279,8 @@ class LyapunovAdaptiveTransformer(Node):
         
         # Determine which commands to ignore based on what's provided
         msg.type_mask = PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | \
-                    PositionTarget.IGNORE_PZ | PositionTarget.IGNORE_VX | \
-                    PositionTarget.IGNORE_VY | PositionTarget.IGNORE_VZ
+                    PositionTarget.IGNORE_PZ | PositionTarget.IGNORE_AFX | \
+                    PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ
         
         # Add yaw control if provided
         if yaw is not None:
@@ -301,18 +293,18 @@ class LyapunovAdaptiveTransformer(Node):
             # If neither yaw nor yaw_rate provided, ignore both
             msg.type_mask |= PositionTarget.IGNORE_YAW | PositionTarget.IGNORE_YAW_RATE
         
-        # Set acceleration values - ensure they're floats
-        accel_enu_x = math.cos(self.origin_r)*accel_x + math.sin(self.origin_r)*accel_y
-        accel_enu_y = -math.sin(self.origin_r)*accel_x + math.cos(self.origin_r)*accel_y
+        # Set velocity values - ensure they're floats
+        vel_enu_x = math.cos(self.origin_r)*vel_x + math.sin(self.origin_r)*vel_y
+        vel_enu_y = -math.sin(self.origin_r)*vel_x + math.cos(self.origin_r)*vel_y
         
         # Saturate acceleration
-        msg.acceleration_or_force.x, msg.acceleration_or_force.y, msg.acceleration_or_force.z = saturate_vector(accel_enu_x, accel_enu_y, accel_z, 2.0)
+        msg.velocity.x, msg.velocity.y, msg.velocity.z = saturate_vector(vel_enu_x, vel_enu_y, vel_z, 2.0)
         
         # log to check control input
         #self.get_logger().info(f"ax: {msg.acceleration_or_force.x}, ay: {msg.acceleration_or_force.y}, az: {msg.acceleration_or_force.z}")
         
         
-        self.accel_pub.publish(msg)
+        self.vel_pub.publish(msg)
         
     async def arm(self):
         """Arm the vehicle"""
@@ -334,14 +326,14 @@ class LyapunovAdaptiveTransformer(Node):
                     return True
                 last_request_time = self.get_clock().now()
                 
-            self.send_accel_command(0.0, 0.0, 0.0, 0.0, 0.0)  # Send neutral commands while waiting
+            self.send_command(0.0, 0.0, 0.0, 0.0, 0.0)  # Send neutral commands while waiting
             await self.sleep(0.05)
     
     async def set_offboard(self):
         """Set to offboard mode"""
         # Send a few setpoints before starting
         for i in range(100):
-            self.send_accel_command(0.0, 0.0, 0.0, 0.0, 0.0)
+            self.send_command(0.0, 0.0, 0.0, 0.0, 0.0)
             await self.sleep(0.05)
 
         last_request_time = self.get_clock().now()
@@ -363,7 +355,7 @@ class LyapunovAdaptiveTransformer(Node):
                     return True
                 last_request_time = self.get_clock().now()
                 
-            self.send_accel_command(0.0, 0.0, 0.0, 0.0, 0.0)  # Send neutral commands while waiting
+            self.send_command(0.0, 0.0, 0.0, 0.0, 0.0)  # Send neutral commands while waiting
             await self.sleep(0.05)
     
     async def takeoff(self, height):
@@ -410,52 +402,51 @@ class LyapunovAdaptiveTransformer(Node):
         self.get_logger().info("Finished Taking off")
     
     async def run_trajectory(self):
-        """Run the main control loop following a trajectory"""
         self.get_logger().info("Starting trajectory tracking...")
         
-        #traj_start_time = self.get_clock().now()
+        traj_start_time = self.get_clock().now()
         
         controller = LyAT.LyAT_Controller(self.config)
         tracking_errors = []
         control_inputs = []
-        parameter_norms = []
-        # Compute control input
-        for step in range(1, self.time_steps):
-            t = step * self.dt
-
-            # Progress 
-            if step % 100 == 0:
-                progress = 100 * step / self.time_steps
-                theta = torch.cat([p.view(-1) for p in controller.transformer.parameters()])
-                param_norm = torch.norm(theta).item()
-                parameter_norms.append(param_norm) 
-                print(f"\rProgress: {progress:.1f}% | ||θ||: {param_norm:.2f}", end="", flush=True)
-
-            # TODO: CONVERT THIS LOGIC TO USE CURRENT PX4 STATES
-            # TODO: DESIRED STATES? HOW MANY STATES, 3?
-            #x = self.x[:, step - 1]
-            # xd, xd_dot = LyAT.Dynamics.desired_trajectory(torch.tensor(t, dtype=torch.float32))
-            # u, Phi = controller.parameter_adaptation(x, t)
-            # self.update_state(step, u, t)
-
-            # e = self.x[:, step] - xd
-            error_norm = torch.norm(e).item()
-            tracking_errors.append(error_norm)
-            control_inputs.append(torch.norm(u).item())
-
-                
-        # Ensure we have float values
-        ax = float(u[0])
-        ay = float(u[1])
-        az = float(u[2])
         
-        # Send acceleration command
-        self.send_accel_command(ax, ay, az)
+        # Compute control input
+        # Progress
+        while rclpy.OK(): 
+            try:
+                t = (self.get_clock().now() - traj_start_time).nanoseconds / 1e9     
 
-        # End Simulation
-        # if t >= self.tf:
-        #     self.get_logger().info(f"{t} seconds elapsed, ending trajectory.")
-        #     break      
+                if t > self.tf:
+                    self.get_logger().info(f"Reached final time of {self.tf} seconds.")
+                    break
+
+                x = torch.tensor([self.position, self.velocity], dtype=torch.flat32)
+
+                # -------------------------------------------------------------------- #
+                xd, xd_dot = LyAT.Dynamics.desired_trajectory(torch.tensor(t, dtype=torch.float32))
+                u, Phi = controller.parameter_adaptation(x, t)
+                # -------------------------------------------------------------------- #
+
+                e = x - xd
+                error_norm = torch.norm(e).item()
+                tracking_errors.append(error_norm)
+                control_inputs.append(torch.norm(u).item())
+
+
+                # Ensure we have float values
+                vx = float(u[0])
+                vy = float(u[1])
+                vz = float(u[2])
+                
+                # Send velocity command
+                self.send_command(vx, vy, vz, yaw=None, yaw_rate=None)
+            
+            except Exception as e:
+                self.get_logger().error(f"Error in control loop: {e}")
+                self.get_logger().error(f"Error details: {type(e)}") 
+        
+
+
             
     
     async def land(self):
@@ -499,7 +490,7 @@ class LyapunovAdaptiveTransformer(Node):
                 
                 # Send some neutral commands to stabilize
                 for i in range(80):
-                    self.send_accel_command(0.0, 0.0, 0.0, 0.0, 0.0)
+                    self.send_command(0.0, 0.0, 0.0, 0.0, 0.0)
                     await self.sleep(0.01)
                 
                 # Take off next
