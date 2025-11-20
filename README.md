@@ -83,8 +83,7 @@ Achieved --RESULTS HERE-- RMS tracking error on --TRAJECTORY HERE--
 
 
 ### Convergence Behavior
-![Plot showing Lyapunov function decreasing over time](docs/images/lyapunov_convergence.png)
-
+![alt text](Docs/tracking_error.png "Tracking Error Plot")
 
 ## Citation
 
