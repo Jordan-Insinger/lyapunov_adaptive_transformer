@@ -1,10 +1,8 @@
 # Lyapunov Adaptive Transformer (LyAT) for Quadrotor Control
 
-> Real-time adaptive trajectory tracking with guaranteed stability for autonomous UAVs
-
 ## Overview
 
-Implements a Lyapunov-based adaptive controller for quadrotor trajectory tracking under 
+Implements a Lyapunov-based adaptive controller for onbard autonomous quadrotor trajectory tracking under 
 model uncertainties. 
 
 ---
@@ -64,14 +62,31 @@ ros2 launch px4_telemetry astro_sim.launch.py
 ros2 launch lyapunov_adaptive_transformer lyapunov_adaptive_transforerm.launch.py
 ```
 
-### Trajectory Configuration
-Edit `config.json`:
+### Configuration
 ```json
 {
-  "T_final": 30.0,        // Mission duration (s)
-  "dt": 0.01,             // Control period (s)  
-  "n_states": 6,          // [x,y,z,vx,vy,vz]
-
+    "n_states": 6,
+    "window_size": 20,
+    "T_final": 120.0,
+    "dt": 0.005,
+    "ke": 100.0,
+    "gamma": 2.0,
+    "sigma": 0.00001,
+    "theta_bar": 200.0,
+    "num_encoder_layers": 2,
+    "num_decoder_layers": 2,
+    "num_heads": 6,
+    "d_ff": 128,
+    "gamma_encoder_attn": 1.0,
+    "beta_encoder_attn": 0.0,
+    "gamma_encoder_ff": 1.0,
+    "beta_encoder_ff": 0.0,
+    "gamma_decoder_self": 1.0,
+    "beta_decoder_self": 0.0,
+    "gamma_decoder_cross": 1.0,
+    "beta_decoder_cross": 0.0,
+    "gamma_decoder_ff": 1.0,
+    "beta_decoder_ff": 0.0
 }
 ```
 
@@ -85,17 +100,6 @@ Achieved --RESULTS HERE-- RMS tracking error on --TRAJECTORY HERE--
 ### Convergence Behavior
 ![alt text](Docs/tracking_error.png "Tracking Error Plot")
 
-## Citation
-
-If you use this work, please cite:
-```bibtex
-@misc{yourname2024lyat,
-  author = {Jordan Insinger},
-  title = {Lyapunov Adaptive Transformer for Quadrotor Control},
-  year = {2025},
-  url = {https://github.com/yourusername/lyapunov_adaptive_transformer}
-}
-```
 
 **Related Publications:**
 - link_to_paper_when_published
@@ -104,9 +108,8 @@ If you use this work, please cite:
 
 ## Acknowledgments
 
-This work was developed at [Your Lab Name], [University]. Special thanks to:
-- Dr. [Advisor Name] for theoretical guidance
-- [Lab members] for hardware integration support  
-- PX4 and ROS2 communities
+This work was developed at the Nonlinear Control and Robotics Lab, University of Florida. Special thanks to:
+- Dr. Warren Dixon (Advisor)
+- Saia Akbari (Wrote the paper)  
 
 ---
