@@ -90,17 +90,15 @@ Achieved --RESULTS HERE-- RMS tracking error on --TRAJECTORY HERE--
 If you use this work, please cite:
 ```bibtex
 @misc{yourname2024lyat,
-  author = {Your Name},
+  author = {Jordan Insinger},
   title = {Lyapunov Adaptive Transformer for Quadrotor Control},
-  year = {2024},
-  publisher = {GitHub},
+  year = {2025},
   url = {https://github.com/yourusername/lyapunov_adaptive_transformer}
 }
 ```
 
 **Related Publications:**
-- [Link to your lab's paper if published]
-- [Link to thesis/technical report]
+- link_to_paper_when_published
 
 ---
 
