@@ -323,7 +323,7 @@ class LyapunovAdaptiveTransformer(Node):
                     self.takeoff_mode = True
                     return True
                 
-            await asyncio.sleep(0.02)
+            await self.sleep(0.02)
 
         self.get_logger().info("Finished Taking off")
     
@@ -352,7 +352,7 @@ class LyapunovAdaptiveTransformer(Node):
                 self.send_command(vx, vy, vz, yaw=None, yaw_rate=None)
                 
 
-                await asyncio.sleep(0.01)
+                await self.sleep(0.01)
             
             except Exception as e:
                 self.get_logger().error(f"Error in control loop: {e}")
@@ -373,7 +373,7 @@ class LyapunovAdaptiveTransformer(Node):
             
         # Wait for landing
         while self.armed and rclpy.ok():
-            await asyncio.sleep(0.5)
+            await self.sleep(0.5)
             
         self.get_logger().info("Landing complete")
     
