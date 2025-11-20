@@ -100,7 +100,6 @@ class LyapunovAdaptiveTransformer(Node):
         self.state_sub = self.create_subscription(State, 'state', self.state_callback, qos_profile=qos_profile_sensor_data)
         self.altitude_sub = self.create_subscription(Altitude, 'altitude', self.altitude_callback, qos_profile=qos_profile_sensor_data)
         self.global_pos_sub = self.create_subscription(NavSatFix, 'global_position/global', self.global_pose_callback, qos_profile=qos_profile_sensor_data)
-        # self.joy_sub = self.create_subscription(Joy, 'joy', self.joy_callback, qos_profile=qos_profile_sensor_data)
 
         # Service clients
         self.arming_client = self.create_client(CommandBool, 'cmd/arming')
@@ -165,110 +164,6 @@ class LyapunovAdaptiveTransformer(Node):
         self.armed = msg.armed
         self.offboard_mode = (msg.mode == "OFFBOARD")
         
-    # def joy_callback(self, joy_msg):
-    #     # Joy input callback
-    #     accel_x = joy_msg.axes[1]
-    #     accel_y = joy_msg.axes[0]
-    #     accel_z = joy_msg.axes[4]
-
-    #     joy_msg = PositionTarget()
-    #     joy_msg.header.stamp = self.get_clock().now().to_msg()
-    #     joy_msg.header.frame_id = "base_link"
-    #     joy_msg.coordinate_frame = PositionTarget.FRAME_BODY_NED
-        
-    #     # Set the type mask to use acceleration only
-    #     joy_msg.type_mask = PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | \
-    #                    PositionTarget.IGNORE_PZ | PositionTarget.IGNORE_VX | \
-    #                    PositionTarget.IGNORE_VY | PositionTarget.IGNORE_VZ | \
-    #                    PositionTarget.IGNORE_YAW | PositionTarget.IGNORE_YAW_RATE
-
-    #     # Set acceleration values - ensure they're floats
-    #     joy_msg.acceleration_or_force.x = math.cos(self.origin_r)*accel_x + math.sin(self.origin_r)*accel_y
-    #     joy_msg.acceleration_or_force.y = -math.sin(self.origin_r)*accel_x + math.cos(self.origin_r)*accel_y
-    #     joy_msg.acceleration_or_force.z = accel_z
-
-        # log to check control input
-        #self.get_logger().info(f"ax: {joy_msg.acceleration_or_force.x}, ay: {joy_msg.acceleration_or_force.y}, az: {joy_msg.acceleration_or_force.z}")
-
-        # Uncomment to enable direct joystick control
-        #self.vel_pub.publish(joy_msg)
-        
-    def get_desired_state(self, t):
-        # Common parameters
-        height = 2.0  # meters
-        omega = 0.2  # rad/s
-        
-        # Default values
-        x_d, y_d, z_d = 0.0, 0.0, height
-        vx_d, vy_d, vz_d = 0.0, 0.0, 0.0
-        ax_d, ay_d, az_d = 0.0, 0.0, 0.0
-        
-        # Trajectory 1: Hover at point (0,0,8)
-        if self.trajectory == "point":
-            # All values are already initialized to hover
-            pass
-            
-        # Trajectory 2: Circle centered at origin
-        elif self.trajectory == "circle":
-            r = 2.5  # Radius of circle (5 meters)
-            
-            # Position
-            x_d = r * np.cos(omega * t)
-            y_d = r * np.sin(omega * t)
-            
-            # Velocity
-            vx_d = -r * omega * np.sin(omega * t)
-            vy_d = r * omega * np.cos(omega * t)
-            
-            
-        # Trajectory 3: Figure eight in x-direction
-        elif self.trajectory == "figure8":
-            a = 5.0  # Half-width of the long side (x-direction)
-            b = 2.5  # Half-width of the short side (y-direction)
-            
-            # Position (figure 8 with major axis along x)
-            x_d = a * np.sin(omega * t)
-            y_d = b * np.sin(2 * omega * t)
-            
-            # Velocity
-            vx_d = a * omega * np.cos(omega * t)
-            vy_d = 2 * b * omega * np.cos(2 * omega * t)
-
-        
-        # Update states
-        self.target_position[0] = x_d
-        self.target_position[1] = y_d
-        self.target_position[2] = z_d
-        self.target_velocity[0] = vx_d
-        self.target_velocity[1] = vy_d
-        self.target_velocity[2] = vz_d
-
-        # Broadcast tf for rViz
-        tf = TransformStamped()
-        # Set the timestamp and frame IDs
-        tf.header.stamp = self.get_clock().now().to_msg()
-        tf.header.frame_id = "autonomy_park"  # Parent frame
-        tf.child_frame_id = "target_position"  # Child frame
-        
-        # Set the translation (position)
-        tf.transform.translation.x = x_d
-        tf.transform.translation.y = y_d
-        tf.transform.translation.z = height
-        
-        # Set the rotation (identity quaternion if no specific orientation)
-        tf.transform.rotation.x = 0.0
-        tf.transform.rotation.y = 0.0
-        tf.transform.rotation.z = 0.0
-        tf.transform.rotation.w = 1.0
-    
-        # Send the transform
-        self.tf_broadcaster.sendTransform(tf)
-
-        return (np.array([x_d, y_d, z_d]), 
-                np.array([vx_d, vy_d, vz_d]), 
-                np.array([ax_d, ay_d, az_d]))
-
-    
     def compute_control_input(self, t, controller):
         x = torch.tensor([self.position[0], self.position[1], self.position[2],
                                         self.velocity[0], self.velocity[1], self.velocity[2]],
@@ -344,15 +239,10 @@ class LyapunovAdaptiveTransformer(Node):
         # Saturate acceleration
         msg.velocity.x, msg.velocity.y, msg.velocity.z = saturate_vector(vel_enu_x, vel_enu_y, vel_z, 2.0)
         
-        # log to check control input
-        #self.get_logger().info(f"ax: {msg.acceleration_or_force.x}, ay: {msg.acceleration_or_force.y}, az: {msg.acceleration_or_force.z}")
-        
-        
         self.vel_pub.publish(msg)
         
     async def arm(self):
         """Arm the vehicle"""
-
         last_request_time = self.get_clock().now()
         
         while rclpy.ok():
@@ -371,14 +261,12 @@ class LyapunovAdaptiveTransformer(Node):
                 last_request_time = self.get_clock().now()
                 
             self.send_command(0.0, 0.0, 0.0, 0.0, 0.0)  # Send neutral commands while waiting
-            await self.sleep(0.05)
     
     async def set_offboard(self):
         """Set to offboard mode"""
         # Send a few setpoints before starting
         for i in range(100):
             self.send_command(0.0, 0.0, 0.0, 0.0, 0.0)
-            await self.sleep(0.05)
 
         last_request_time = self.get_clock().now()
 
@@ -400,7 +288,6 @@ class LyapunovAdaptiveTransformer(Node):
                 last_request_time = self.get_clock().now()
                 
             self.send_command(0.0, 0.0, 0.0, 0.0, 0.0)  # Send neutral commands while waiting
-            await self.sleep(0.05)
     
     async def takeoff(self, height):
         """Simple takeoff procedure"""
@@ -419,11 +306,6 @@ class LyapunovAdaptiveTransformer(Node):
                     z = float(self.position[2]))
                 global_pose = self.apark_to_global(apark_pose=takeoff_pose)
 
-                # grab home location
-                # self.home_pose.x = takeoff_pose.x
-                # self.home_pose.y = takeoff_pose.y
-                # self.home_pose.z = 1.5 # offset from the ground
-
                 # convert local takeoff (apark frame) to global (lat/long)
                 req = CommandTOL.Request()
                 req.min_pitch = 0.0
@@ -441,7 +323,7 @@ class LyapunovAdaptiveTransformer(Node):
                     self.takeoff_mode = True
                     return True
                 
-            await self.sleep(0.02)
+            await asyncio.sleep(0.02)
 
         self.get_logger().info("Finished Taking off")
     
@@ -470,15 +352,11 @@ class LyapunovAdaptiveTransformer(Node):
                 self.send_command(vx, vy, vz, yaw=None, yaw_rate=None)
                 
 
-                await self.sleep(0.01)
+                await asyncio.sleep(0.01)
             
             except Exception as e:
                 self.get_logger().error(f"Error in control loop: {e}")
                 self.get_logger().error(f"Error details: {type(e)}") 
-        
-
-
-            
     
     async def land(self):
         """Simple landing procedure"""
@@ -495,7 +373,7 @@ class LyapunovAdaptiveTransformer(Node):
             
         # Wait for landing
         while self.armed and rclpy.ok():
-            await self.sleep(0.5)
+            await asyncio.sleep(0.5)
             
         self.get_logger().info("Landing complete")
     
@@ -525,7 +403,7 @@ class LyapunovAdaptiveTransformer(Node):
                     await self.sleep(0.01)
                 
                 # Take off next
-                await self.takeoff(height=8.0)
+                await self.takeoff(height=2.5)
                 
                 # Set offboard mode after takeoff
                 await self.set_offboard()

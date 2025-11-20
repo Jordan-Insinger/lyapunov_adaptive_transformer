@@ -67,7 +67,7 @@ class Dynamics:
         a = 5.0  # meters
         b = 2.5  # meters
         r = 2.5  # radius in meters
-        height = 8.0  # meters
+        height = 2.5  # meters
         omega = 0.2  # rad/s
         
         # # desired position (figure 8)
