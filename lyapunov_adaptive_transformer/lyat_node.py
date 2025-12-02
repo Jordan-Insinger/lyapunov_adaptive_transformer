@@ -274,6 +274,13 @@ class LyapunovAdaptiveTransformer(Node):
                                         self.velocity[0], self.velocity[1], self.velocity[2]],
                                     dtype=torch.float32)
 
+
+        # g2 = LyAT.Dynamics.diffusion_matrix(x)
+        # Sigma = LyAT.Dynamics.covariance_matrix(torch.tensor(t, dtype=torch.float32))
+        # dw = torch.randn(2) * math.sqrt(torch.tensor(self.dt))
+    
+        # x += g2 @ Sigma @ dw
+
         # Convert t to tensor before using it
         t_tensor = torch.tensor(t, dtype=torch.float32)
         self.get_logger().info(f"Time: {t_tensor.item()}")

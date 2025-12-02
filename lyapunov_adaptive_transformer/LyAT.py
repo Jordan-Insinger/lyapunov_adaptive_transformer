@@ -38,9 +38,9 @@ class Dynamics:
     
     @staticmethod
     def diffusion_matrix (x):
-        x1, x2, x3, x4, x5 = x
+        x1, x2, x3, x4, x5, x6 = x
 
-        g2 = torch.zeros(5, 2)
+        g2 = torch.zeros(6, 2)
 
         g2[0,0] = x1 * torch.cos(x2)
         g2[0,1] = 1 - x3 * torch.cos(x4)
@@ -51,7 +51,10 @@ class Dynamics:
         g2[3,0] = (x1 + x2) ** 3 - torch.sin(x3)
         g2[3,1] = 1 - x3 ** 2
         g2[4,0] = x2 * torch.sin(x3) ** 2
-        g2[4,1] = - x5 + x1 * x4 ** 2 
+        g2[4,1] = - x5 + x1 * x4 ** 2
+        g2[5,0] = torch.cos(x6)
+        g2[5,1] = x6 ** 2 + x1 * x2
+
 
         return g2
     
@@ -85,7 +88,7 @@ class Dynamics:
         # xd5_dot = -4 * b * omega**2 * torch.sin(2 * omega * t)
         # xd6_dot = torch.tensor(0.0, dtype=torch.float32)  # Convert to tensor
 
-        xd1 = r * torch.cos(omega * t)
+        xd1 = r * torch.cos(omega * t) -27
         xd2 = r * torch.sin(omega * t)
         xd3 = torch.tensor(height, dtype=torch.float32)
 
@@ -276,6 +279,7 @@ class LyAT (nn.Module):
         self._initialize_weights()
 
     def _initialize_weights (self):
+        torch.manual_seed (0)
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p, gain=0.01)
@@ -374,7 +378,7 @@ class LyAT_Controller:
 
     def build_encoder_input (self):
         n_history = len(self.state_history)
-
+        torch.manual_seed(0)
         if n_history < self.window_size:
             pad_size = self.window_size - n_history
             x_pad = [torch.randn(self.n_states) * 0.1 for _ in range(pad_size)] + self.state_history
@@ -395,7 +399,7 @@ class LyAT_Controller:
     
     def build_decoder_input (self):
         n_history = len(self.Phi_history)
-
+        torch.manual_seed(0)
         if n_history < self.window_size:
             pad_size = self.window_size - n_history
             Phi_pad = [torch.randn(self.n_states) * 0.1 for _ in range(pad_size)] + self.Phi_history
