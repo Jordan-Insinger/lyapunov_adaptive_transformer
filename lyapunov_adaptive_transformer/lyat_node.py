@@ -13,7 +13,7 @@ from transforms3d.euler import euler2quat
 import tf2_geometry_msgs
 from mavros_msgs.msg import PositionTarget, State, Altitude
 from mavros_msgs.srv import SetMode, CommandBool, CommandTOL
-from geometry_msgs.msg import PoseStamped, TwistStamped, TransformStamped
+from geometry_msgs.msg import PoseStamped, Twist, TwistStamped, TransformStamped
 from geographic_msgs.msg import GeoPose, GeoPoint
 from geometry_msgs.msg import Pose, Point, Quaternion
 from sensor_msgs.msg import NavSatFix
@@ -92,7 +92,7 @@ class LyapunovAdaptiveTransformer(Node):
         self.tf_broadcaster = TransformBroadcaster(self)
         
         # Publishers
-        self.vel_pub = self.create_publisher(PositionTarget, 'setpoint_raw/local', qos_profile=qos_profile_sensor_data)
+        self.vel_pub = self.create_publisher(Twist, 'setpoint_velocity/cmd_vel', qos_profile=qos_profile_sensor_data)
         
         # Subscribers
         self.pose_sub = self.create_subscription(PoseStamped, 'autonomy_park/pose', self.pose_callback, qos_profile=qos_profile_sensor_data)
@@ -323,39 +323,45 @@ class LyapunovAdaptiveTransformer(Node):
 
     def send_command(self, vel_x, vel_y, vel_z, yaw=None, yaw_rate=None):
         """Send velocity and attitude command to PX4"""
-        msg = PositionTarget()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = "base_link"
-        msg.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
+        # msg = PositionTarget()
+        # msg.header.stamp = self.get_clock().now().to_msg()
+        # msg.header.frame_id = "base_link"
+        # msg.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
         
-        # Determine which commands to ignore based on what's provided
-        msg.type_mask = PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | \
-                    PositionTarget.IGNORE_PZ | PositionTarget.IGNORE_AFX | \
-                    PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ
+        # # Determine which commands to ignore based on what's provided
+        # msg.type_mask = PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | \
+        #             PositionTarget.IGNORE_PZ | PositionTarget.IGNORE_AFX | \
+        #             PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ
         
-        # Add yaw control if provided
-        if yaw is not None:
-            msg.yaw = yaw + self.origin_r
-            msg.type_mask |= PositionTarget.IGNORE_YAW_RATE
-        elif yaw_rate is not None:
-            msg.yaw_rate = yaw_rate
-            msg.type_mask |= PositionTarget.IGNORE_YAW
-        else:
-            # If neither yaw nor yaw_rate provided, ignore both
-            msg.type_mask |= PositionTarget.IGNORE_YAW | PositionTarget.IGNORE_YAW_RATE
+        # # Add yaw control if provided
+        # if yaw is not None:
+        #     msg.yaw = yaw + self.origin_r
+        #     msg.type_mask |= PositionTarget.IGNORE_YAW_RATE
+        # elif yaw_rate is not None:
+        #     msg.yaw_rate = yaw_rate
+        #     msg.type_mask |= PositionTarget.IGNORE_YAW
+        # else:
+        #     # If neither yaw nor yaw_rate provided, ignore both
+        #     msg.type_mask |= PositionTarget.IGNORE_YAW | PositionTarget.IGNORE_YAW_RATE
         
-        # Set velocity values - ensure they're floats
-        vel_enu_x = math.cos(self.origin_r)*vel_x + math.sin(self.origin_r)*vel_y
-        vel_enu_y = -math.sin(self.origin_r)*vel_x + math.cos(self.origin_r)*vel_y
+        # # Set velocity values - ensure they're floats
+        # vel_enu_x = math.cos(self.origin_r)*vel_x + math.sin(self.origin_r)*vel_y
+        # vel_enu_y = -math.sin(self.origin_r)*vel_x + math.cos(self.origin_r)*vel_y
         
-        # Saturate acceleration
-        msg.velocity.x, msg.velocity.y, msg.velocity.z = saturate_vector(vel_enu_x, vel_enu_y, vel_z, 2.0)
+        # # Saturate acceleration
+        # msg.velocity.x, msg.velocity.y, msg.velocity.z = saturate_vector(vel_enu_x, vel_enu_y, vel_z, 2.0)
         
-        # log to check control input
-        #self.get_logger().info(f"ax: {msg.acceleration_or_force.x}, ay: {msg.acceleration_or_force.y}, az: {msg.acceleration_or_force.z}")
+        # # log to check control input
+        # #self.get_logger().info(f"ax: {msg.acceleration_or_force.x}, ay: {msg.acceleration_or_force.y}, az: {msg.acceleration_or_force.z}")
         
         
-        self.vel_pub.publish(msg)
+        # self.vel_pub.publish(msg)
+        cmdvel = Twist()
+        vx = math.cos(self.origin_r)*vel_x + math.sin(self.origin_r)*vel_y
+        vy = -math.sin(self.origin_r)*vel_x + math.cos(self.origin_r)*vel_y
+        cmdvel.linear.x, cmdvel.linear.y, cmdvel.llinear.z = saturate_vector(vx, vy, vel_z)
+        cmdvel.angular.z = 0.0
+        vel_pub.publish(cmdvel)
         
     async def arm(self):
         """Arm the vehicle"""
