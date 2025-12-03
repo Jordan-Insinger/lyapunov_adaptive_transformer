@@ -15,7 +15,7 @@ import tf2_geometry_msgs
 from mavros_msgs.msg import PositionTarget, State, Altitude
 from mavros_msgs.srv import SetMode, CommandBool, CommandTOL
 from geometry_msgs.msg import PoseStamped, Twist, TwistStamped, TransformStamped
-from geographic_msgs.msg import GeoPose, GeoPoint
+from geographic_msgs.msg import GeoPose, GeoPoseStamped, GeoPoint
 from geometry_msgs.msg import Pose, Point, Quaternion
 from sensor_msgs.msg import NavSatFix
 from scipy.spatial.transform import Rotation as R
@@ -127,7 +127,11 @@ class LyapunovAdaptiveTransformer(Node):
         self.tf = self.config['T_final']
         self.dt = self.config['dt']
         self.time_steps = int(self.tf / self.dt)
-        
+        self.INCLUDE_RMS = self.config['INCLUDE_RMS']
+        self.INCLUDE_PLOTS = self.config['INCLUDE_PLOTS']
+        self.HOME_X = self.config['HOME_X']
+        self.HOME_Y = self.config['HOME_Y']
+        self.VEL_MAX = self.config['VEL_MAX']
         self.dynamics = LyAT.Dynamics()        
 
      # ==================== CALLBACK METHODS ====================
@@ -275,18 +279,16 @@ class LyapunovAdaptiveTransformer(Node):
                                         self.velocity[0], self.velocity[1], self.velocity[2]],
                                     dtype=torch.float32)
 
-
-        # g2 = LyAT.Dynamics.diffusion_matrix(x)
-        # Sigma = LyAT.Dynamics.covariance_matrix(torch.tensor(t, dtype=torch.float32))
-        # dw = torch.randn(2) * math.sqrt(torch.tensor(self.dt))
-    
-        # x += g2 @ Sigma @ dw
-
         # Convert t to tensor before using it
         t_tensor = torch.tensor(t, dtype=torch.float32)
         self.get_logger().info(f"Time: {t_tensor.item()}")
         xd, xd_dot = LyAT.Dynamics.desired_trajectory(t_tensor)
         u, Phi = controller.parameter_adaptation(x, t_tensor)
+
+        # DEBUG
+        #self.get_logger().info(f'pose: {self.position[0]}, {self.position[1]}, {self.position[2]}')
+        #self.get_logger().info(f'vel: {self.velocity[0]}, {self.velocity[1]}, {self.velocity[2]}')
+        #self.get_logger().info(f'control_intput: {u[0]}, {u[1]}, {u[2]}')
 
         # Data Storage
         data_manager.save_state_to_csv(
@@ -358,9 +360,11 @@ class LyapunovAdaptiveTransformer(Node):
         
         # self.vel_pub.publish(msg)
         cmdvel = TwistStamped()
+        cmdvel.header.stamp = self.get_clock().now().to_msg()
+        cmdvel.header.frame_id = "base_link"
         vx = math.cos(self.origin_r)*vel_x + math.sin(self.origin_r)*vel_y
         vy = -math.sin(self.origin_r)*vel_x + math.cos(self.origin_r)*vel_y
-        cmdvel.twist.linear.x, cmdvel.twist.linear.y, cmdvel.twist.linear.z = saturate_vector(vx, vy, vel_z, 3.0)
+        cmdvel.twist.linear.x, cmdvel.twist.linear.y, cmdvel.twist.linear.z = saturate_vector(vx, vy, vel_z, self.VEL_MAX)
         cmdvel.twist.angular.z = 0.0
         self.vel_pub.publish(cmdvel)
         
@@ -433,11 +437,6 @@ class LyapunovAdaptiveTransformer(Node):
                     z = float(self.position[2]))
                 global_pose = self.apark_to_global(apark_pose=takeoff_pose)
 
-                # grab home location
-                # self.home_pose.x = takeoff_pose.x
-                # self.home_pose.y = takeoff_pose.y
-                # self.home_pose.z = 1.5 # offset from the ground
-
                 # convert local takeoff (apark frame) to global (lat/long)
                 req = CommandTOL.Request()
                 req.min_pitch = 0.0
@@ -489,10 +488,33 @@ class LyapunovAdaptiveTransformer(Node):
             except Exception as e:
                 self.get_logger().error(f"Error in control loop: {e}")
                 self.get_logger().error(f"Error details: {type(e)}") 
-        
 
+    async def return_home(self):
+        # create velocity setpoint msg
+        setpoint_vel = TwistStamped()
+        setpoint_vel.header.stamp = self.get_clock().now().to_msg()
+        setpoint_vel.header.frame_id = "base_link"
 
-            
+        ex = self.HOME_X - self.position[0]
+        ey = self.HOME_Y - self.position[1]
+        # small p controller to get drone near home pose
+        while (math.sqrt(ex**2 + ey**2) >= 0.2):
+
+            ex = self.HOME_X - self.position[0]
+            ey = self.HOME_Y - self.position[1]
+            k = 0.3
+
+            vel_x = k*ex
+            vel_y = k*ey
+            vel_z = 0.0
+
+            vx = math.cos(self.origin_r)*vel_x + math.sin(self.origin_r)*vel_y
+            vy = -math.sin(self.origin_r)*vel_x + math.cos(self.origin_r)*vel_y
+            setpoint_vel.twist.linear.x, setpoint_vel.twist.linear.y, setpoint_vel.twist.linear.z = saturate_vector(vx, vy, vel_z, self.VEL_MAX)
+            setpoint_vel.twist.angular.z = 0.0
+
+            self.vel_pub.publish(setpoint_vel)
+            await self.sleep(0.01)
     
     async def land(self):
         """Simple landing procedure"""
@@ -546,6 +568,10 @@ class LyapunovAdaptiveTransformer(Node):
                 
                 # Run trajectory
                 await self.run_trajectory()
+
+                # return to home
+                await self.return_home()
+
         except Exception as e:
             self.get_logger().error(f"Error in mission: {e}")
             # Print more details about the error
@@ -555,7 +581,8 @@ class LyapunovAdaptiveTransformer(Node):
             # Land when done or if interrupted
             await self.land()
             
-            self.print_results()
+            if self.INCLUDE_RMS or self.INCLUDE_PLOTS:
+                self.print_results()
 
 
     def apark_to_global(self, apark_pose):
@@ -599,10 +626,13 @@ class LyapunovAdaptiveTransformer(Node):
         target_state_data = pd.read_csv('src/lyapunov_adaptive_transformer/simulation_data/target_state_data.csv')
         time_array = target_state_data['Time']
 
-        tracking_error_norm = state_data['Tracking_Error_Norm']
-        rms_tracking_error = np.sqrt(np.mean(tracking_error_norm**2))
-        self.get_logger().info(f'Mean RMS Tracking Error: {rms_tracking_error} m')
-        data_manager.plot_from_csv()
+        if self.INCLUDE_RMS:
+            tracking_error_norm = state_data['Tracking_Error_Norm']
+            rms_tracking_error = np.sqrt(np.mean(tracking_error_norm**2))
+            self.get_logger().info(f'Mean RMS Tracking Error: {rms_tracking_error} m')
+
+        if self.INCLUDE_PLOTS:
+            data_manager.plot_from_csv()
 
 def saturate_vector(vec_x, vec_y, vec_z, max_magnitude):
     """

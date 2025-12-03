@@ -6,14 +6,7 @@ import math
 import json
 import os
 import rclpy
-import logging
 
-# Initialize logging
-logging.basicConfig(
-    filename='debug.log',
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
 
 # ================== Dynamical System ====================== #
 class Dynamics:
@@ -459,8 +452,6 @@ class LyAT_Controller:
 
     def parameter_adaptation (self, x, t):
         xd, xd_dot = Dynamics.desired_trajectory (torch.tensor(t, dtype = torch.float32))
-        # logging.debug(f"X: {x.shape}")
-        # logging.debug(f"Xd: {xd.shape}")
 
         e = x - xd
 
@@ -475,18 +466,7 @@ class LyAT_Controller:
 
         theta = torch.cat([p.view(-1) for p in self.transformer.parameters()])
 
-        # Log intermediate values for debugging
-    
-        # logging.debug(f"Jacobian shape: {jacobian.shape}")
-        logging.debug(f"Error vector (e): {e}")
-        # logging.debug(f"Theta: {theta.shape}")
-        # logging.debug(f"Gamma: {self.Gamma.shape}")
-        # logging.debug(f"Sigma: {self.sigma}")
-
         projected_term = self.Gamma @ (jacobian.T @ e - self.sigma * theta)
-
-        # Log the projected_term for debugging
-        logging.debug(f"Projected term: {projected_term}")
 
         projected = smooth_projection (projected_term, theta, self.theta_bar)
 
@@ -507,9 +487,6 @@ class LyAT_Controller:
         g1 = Dynamics.control_effectiveness()
         g1_inv = torch.inverse(g1) 
 
-        # logging.debug(f"g1_inv: {g1_inv.shape}")
-        # logging.debug(f"xd_dot: {xd_dot.shape}")
-        # logging.debug(f"other terms: {(self.ke * e - Phi).shape}")
         u = g1_inv @ (xd_dot - self.ke * e - Phi)
         
         self.update_history(x, xd, e, Phi)
@@ -620,30 +597,6 @@ def main ():
     torch.manual_seed(42)
     np.random.seed(42)
     with open('lyapunov_adaptive_transformer/lyapunov_adaptive_transformer/config.json', 'r') as config_file: config = json.load(config_file)
-    # config = {
-    #     "n_states": 5,
-    #     "window_size": 10,
-    #     "T_final": 10.0,
-    #     "dt": 0.005,
-    #     "ke": 100.0,
-    #     "gamma": 1,
-    #     "sigma": 0.001,
-    #     "theta_bar": 100.0,
-    #     "num_encoder_layers": 2,
-    #     "num_decoder_layers": 2,
-    #     "num_heads": 5,
-    #     "d_ff": 128,
-    #     "gamma_encoder_attn": 1.0,
-    #     "beta_encoder_attn": 0.0,
-    #     "gamma_encoder_ff": 1.0,
-    #     "beta_encoder_ff": 0.0,
-    #     "gamma_decoder_self": 1.0,
-    #     "beta_decoder_self": 0.0,
-    #     "gamma_decoder_cross": 1.0,
-    #     "beta_decoder_cross": 0.0,
-    #     "gamma_decoder_ff": 1.0,
-    #     "beta_decoder_ff": 0.0
-    # }
 
     # Save config
     with open('config_LyAT.json', 'w') as f:
