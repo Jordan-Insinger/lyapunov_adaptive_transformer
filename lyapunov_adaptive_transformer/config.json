@@ -3,15 +3,15 @@
     "window_size": 20,
     "T_final": 60.0,
     "dt": 0.005,
-    "ke": 50.0,
-    "gamma": 1,
-    "sigma": 0.5,
-    "theta_bar": 300.0,
+    "ke": 35,
+    "gamma": 2.5,
+    "sigma": 0.00001,
+    "theta_bar": 3000.0,
     "num_encoder_layers": 1,
     "num_decoder_layers": 1,
     "num_heads": 3,
     "d_ff": 5,
-    "gamma_encoder_attn": 1.5,
+    "gamma_encoder_attn": 3,
     "beta_encoder_attn": -1.0,
     "gamma_encoder_ff": 5,
     "beta_encoder_ff": 0.0,
@@ -25,5 +25,5 @@
 	"INCLUDE_PLOTS": true,
 	"HOME_X": 0.0,
 	"HOME_Y": 0.0,
-	"VEL_MAX": 2.2
+	"VEL_MAX": 1.9
 }

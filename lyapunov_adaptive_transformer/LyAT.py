@@ -61,7 +61,7 @@ class Dynamics:
     @staticmethod
     def desired_trajectory(t):
         height = 8.0  # meters
-        omega = 0.2  # rad/s
+        omega = 0.15  # rad/s
         r = 2.5
         
         # # desired position (figure 8)
@@ -79,6 +79,7 @@ class Dynamics:
         # xd5_dot = -4 * b * omega**2 * torch.sin(2 * omega * t)
         # xd6_dot = torch.tensor(0.0, dtype=torch.float32)  # Convert to tensor
 
+        z_tilt = 0.0 
         xd1 = r * torch.cos(omega * t) -27
         xd2 = r * torch.sin(omega * t)
         xd3 = torch.tensor(height, dtype=torch.float32)
@@ -99,16 +100,15 @@ class Dynamics:
         # Position (figure 8 with major axis along x)
         xd1 = a * torch.sin(omega * t)
         xd2 = b * torch.sin(2.0 * omega * t)
-        xd3 = torch.tensor(height, dtype=torch.float32) 
-
+        xd3 = torch.tensor(height, dtype=torch.float32) + (z_tilt / 2) * torch.sin(omega * t)
         # Velocity
         xd4 = a * omega * torch.cos(omega * t)
         xd5 = 2 * b * omega * torch.cos(2.0 * omega * t)
-        xd6 = torch.tensor(0.0, dtype=torch.float32) # non-changing z pos
+        xd6 = (z_tilt / 2) * omega * torch.cos(omega * t)
 
         xd4_dot = -a * omega**2 * torch.sin(omega * t)
         xd5_dot = -4 * b * omega**2 * torch.sin(2.0 * omega * t)
-        xd6_dot = torch.tensor(0.0, dtype=torch.float32)
+        xd6_dot = -(z_tilt / 2) * omega**2 * torch.sin(omega * t)
 
         xd = torch.stack([xd1, xd2, xd3, xd4, xd5, xd6])
         xd_dot = torch.stack([xd4, xd5, xd6, xd4_dot, xd5_dot, xd6_dot])
@@ -290,7 +290,7 @@ class LyAT (nn.Module):
         torch.manual_seed (0)
         for p in self.parameters():
             if p.dim() > 1:
-                nn.init.xavier_uniform_(p, gain=0.01)
+                nn.init.xavier_uniform_(p, gain=0.5)
 
     def forward (self, zeta_encoder, Phi_history):
         batch_size = zeta_encoder.size(0)
@@ -347,20 +347,20 @@ class LyAT_Controller:
         self.transformer = LyAT (
             n_states = self.n_states,            
             window_size = self.window_size,
-            num_encoder_layers = config.get('num_encoder_layers', 2),
-            num_decoder_layers = config.get('num_decoder_layers', 2),
-            num_heads = config.get('num_heads', 5),
-            d_ff = config.get('d_ff', 128),
-            gamma_encoder_attn = config.get('gamma_encoder_attn', 1.0),
-            beta_encoder_attn = config.get('beta_encoder_attn', 0.0),
-            gamma_encoder_ff = config.get('gamma_encoder_ff', 1.0),
-            beta_encoder_ff = config.get('beta_encoder_ff', 0.0),
-            gamma_decoder_self = config.get('gamma_decoder_self', 1.0),
-            beta_decoder_self = config.get('beta_decoder_self', 0.0),
-            gamma_decoder_cross = config.get('gamma_decoder_cross', 1.0),
-            beta_decoder_cross = config.get('beta_decoder_cross', 0.0),
-            gamma_decoder_ff = config.get('gamma_decoder_ff', 1.0),
-            beta_decoder_ff = config.get('beta_decoder_ff', 0.0)
+            num_encoder_layers = config.get('num_encoder_layers'),
+            num_decoder_layers = config.get('num_decoder_layers'),
+            num_heads = config.get('num_heads'),
+            d_ff = config.get('d_ff'),
+            gamma_encoder_attn = config.get('gamma_encoder_attn'),
+            beta_encoder_attn = config.get('beta_encoder_attn'),
+            gamma_encoder_ff = config.get('gamma_encoder_ff'),
+            beta_encoder_ff = config.get('beta_encoder_ff'),
+            gamma_decoder_self = config.get('gamma_decoder_self'),
+            beta_decoder_self = config.get('beta_decoder_self'),
+            gamma_decoder_cross = config.get('gamma_decoder_cross'),
+            beta_decoder_cross = config.get('beta_decoder_cross'),
+            gamma_decoder_ff = config.get('gamma_decoder_ff'),
+            beta_decoder_ff = config.get('beta_decoder_ff')
         )
 
         n_parameters = self.transformer.count_parameters()

@@ -284,6 +284,8 @@ class LyapunovAdaptiveTransformer(Node):
         self.get_logger().info(f"Time: {t_tensor.item()}")
         xd, xd_dot = LyAT.Dynamics.desired_trajectory(t_tensor)
         u, Phi = controller.parameter_adaptation(x, t_tensor)
+        theta = torch.cat([p.view(-1) for p in controller.transformer.parameters()])
+        data_manager.save_theta_to_csv(self.step, t, theta.detach().cpu().numpy())
 
         # DEBUG
         #self.get_logger().info(f'pose: {self.position[0]}, {self.position[1]}, {self.position[2]}')
@@ -565,6 +567,9 @@ class LyapunovAdaptiveTransformer(Node):
                 
                 # Set offboard mode after takeoff
                 await self.set_offboard()
+
+                # return to home
+                await self.return_home()
                 
                 # Run trajectory
                 await self.run_trajectory()
