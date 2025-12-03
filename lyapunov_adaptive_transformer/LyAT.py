@@ -67,11 +67,9 @@ class Dynamics:
     
     @staticmethod
     def desired_trajectory(t):
-        a = 5.0  # meters
-        b = 2.5  # meters
-        r = 2.5  # radius in meters
         height = 8.0  # meters
         omega = 0.2  # rad/s
+        r = 2.5
         
         # # desired position (figure 8)
         # xd1 = a * torch.sin(omega * t)
@@ -102,6 +100,23 @@ class Dynamics:
         xd5_dot = -r * omega**2 * torch.sin(omega * t)
         xd6_dot = torch.tensor(0.0, dtype=torch.float32)
         
+        a = 7.5  # Half-width of the long side (x-direction)
+        b = 4.0  # Half-width of the short side (y-direction)
+        
+        # Position (figure 8 with major axis along x)
+        xd1 = a * torch.sin(omega * t)
+        xd2 = b * torch.sin(2.0 * omega * t)
+        xd3 = torch.tensor(height, dtype=torch.float32) 
+
+        # Velocity
+        xd4 = a * omega * torch.cos(omega * t)
+        xd5 = 2 * b * omega * torch.cos(2.0 * omega * t)
+        xd6 = torch.tensor(0.0, dtype=torch.float32) # non-changing z pos
+
+        xd4_dot = -a * omega**2 * torch.sin(omega * t)
+        xd5_dot = -4 * b * omega**2 * torch.sin(2.0 * omega * t)
+        xd6_dot = torch.tensor(0.0, dtype=torch.float32)
+
         xd = torch.stack([xd1, xd2, xd3, xd4, xd5, xd6])
         xd_dot = torch.stack([xd4, xd5, xd6, xd4_dot, xd5_dot, xd6_dot])
         

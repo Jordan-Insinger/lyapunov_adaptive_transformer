@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import numpy as np
+import pandas as pd
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -92,7 +93,7 @@ class LyapunovAdaptiveTransformer(Node):
         self.tf_broadcaster = TransformBroadcaster(self)
         
         # Publishers
-        self.vel_pub = self.create_publisher(Twist, 'setpoint_velocity/cmd_vel', qos_profile=qos_profile_sensor_data)
+        self.vel_pub = self.create_publisher(TwistStamped, 'setpoint_velocity/cmd_vel', qos_profile=qos_profile_sensor_data)
         
         # Subscribers
         self.pose_sub = self.create_subscription(PoseStamped, 'autonomy_park/pose', self.pose_callback, qos_profile=qos_profile_sensor_data)
@@ -356,12 +357,12 @@ class LyapunovAdaptiveTransformer(Node):
         
         
         # self.vel_pub.publish(msg)
-        cmdvel = Twist()
+        cmdvel = TwistStamped()
         vx = math.cos(self.origin_r)*vel_x + math.sin(self.origin_r)*vel_y
         vy = -math.sin(self.origin_r)*vel_x + math.cos(self.origin_r)*vel_y
-        cmdvel.linear.x, cmdvel.linear.y, cmdvel.llinear.z = saturate_vector(vx, vy, vel_z)
-        cmdvel.angular.z = 0.0
-        vel_pub.publish(cmdvel)
+        cmdvel.twist.linear.x, cmdvel.twist.linear.y, cmdvel.twist.linear.z = saturate_vector(vx, vy, vel_z, 3.0)
+        cmdvel.twist.angular.z = 0.0
+        self.vel_pub.publish(cmdvel)
         
     async def arm(self):
         """Arm the vehicle"""
@@ -553,6 +554,8 @@ class LyapunovAdaptiveTransformer(Node):
         finally:
             # Land when done or if interrupted
             await self.land()
+            
+            self.print_results()
 
 
     def apark_to_global(self, apark_pose):
@@ -590,6 +593,16 @@ class LyapunovAdaptiveTransformer(Node):
             orientation = q_utm)
         
         return global_pose
+
+    def print_results(self):
+        state_data = pd.read_csv('src/lyapunov_adaptive_transformer/simulation_data/state_data.csv')
+        target_state_data = pd.read_csv('src/lyapunov_adaptive_transformer/simulation_data/target_state_data.csv')
+        time_array = target_state_data['Time']
+
+        tracking_error_norm = state_data['Tracking_Error_Norm']
+        rms_tracking_error = np.sqrt(np.mean(tracking_error_norm**2))
+        self.get_logger().info(f'Mean RMS Tracking Error: {rms_tracking_error} m')
+        data_manager.plot_from_csv()
 
 def saturate_vector(vec_x, vec_y, vec_z, max_magnitude):
     """
@@ -639,6 +652,7 @@ def euler_to_quaternion(roll: float, pitch: float, yaw: float) -> Quaternion:
     x, y, z, w = r.as_quat()  # Convert to (x, y, z, w) format
     return Quaternion(x=x, y=y, z=z, w=w)
 
+    
 def main(args=None):
     rclpy.init(args=args)
     
@@ -650,6 +664,8 @@ def main(args=None):
     try:
         # Run the async method in the event loop
         loop.run_until_complete(lyapunov_adaptive_transformer.run_mission())
+        
+
     except KeyboardInterrupt:
         pass
     finally:
