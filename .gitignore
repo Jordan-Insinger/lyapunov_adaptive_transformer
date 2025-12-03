@@ -1,0 +1,5 @@
+simulation_data/state_data.csv
+
+simulation_data/target_state_data.csv
+
+lyapunov_adaptive_transformer/__pycache__/*
