@@ -60,7 +60,7 @@ class Dynamics:
     
     @staticmethod
     def desired_trajectory(t):
-        height = 8.0  # meters
+        height = 2.5  # meters
         omega = 0.15  # rad/s
         r = 2.5
         
@@ -80,22 +80,8 @@ class Dynamics:
         # xd6_dot = torch.tensor(0.0, dtype=torch.float32)  # Convert to tensor
 
         z_tilt = 0.0 
-        xd1 = r * torch.cos(omega * t) -27
-        xd2 = r * torch.sin(omega * t)
-        xd3 = torch.tensor(height, dtype=torch.float32)
-
-        # desired velocity
-        xd4 = -r * omega * torch.sin(omega * t)
-        xd5 = r * omega * torch.cos(omega * t)
-        xd6 = torch.tensor(0.0, dtype=torch.float32)
-
-        # desired acceleration
-        xd4_dot = -r * omega**2 * torch.cos(omega * t)
-        xd5_dot = -r * omega**2 * torch.sin(omega * t)
-        xd6_dot = torch.tensor(0.0, dtype=torch.float32)
-        
         a = 7.5  # Half-width of the long side (x-direction)
-        b = 4.0  # Half-width of the short side (y-direction)
+        b = 3.0  # Half-width of the short side (y-direction)
         
         # Position (figure 8 with major axis along x)
         xd1 = a * torch.sin(omega * t)
@@ -290,7 +276,7 @@ class LyAT (nn.Module):
         torch.manual_seed (0)
         for p in self.parameters():
             if p.dim() > 1:
-                nn.init.xavier_uniform_(p, gain=0.5)
+                nn.init.xavier_uniform_(p, gain=0.01)
 
     def forward (self, zeta_encoder, Phi_history):
         batch_size = zeta_encoder.size(0)

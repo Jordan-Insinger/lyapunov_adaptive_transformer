@@ -563,7 +563,7 @@ class LyapunovAdaptiveTransformer(Node):
                     await self.sleep(0.01)
                 
                 # Take off next
-                await self.takeoff(height=8.0)
+                await self.takeoff(height=2.5)
                 
                 # Set offboard mode after takeoff
                 await self.set_offboard()
