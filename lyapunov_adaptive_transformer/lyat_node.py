@@ -1,10 +1,28 @@
 #!/usr/bin/env python3
+"""
+Lyapunov Adaptive Transformer ROS2 Node
+
+This node implements a Lyapunov-based adaptive transformer controller for
+quadcopter trajectory tracking. It interfaces with MAVROS to control
+a PX4-based autopilot system.
+
+Author: Jordan Insinger
+"""
+
 import numpy as np
 import pandas as pd
+import math
+from scipy.spatial.transform import Rotation as R
+import time
+import traceback
+import json
+import torch
+from typing import Optional, Tuple
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-import math
+import asyncio
 from geodesy import utm
 import utm
 import geodesy
@@ -12,31 +30,52 @@ import tf2_ros
 from tf2_ros import TransformBroadcaster
 from transforms3d.euler import euler2quat
 import tf2_geometry_msgs
+
 from mavros_msgs.msg import PositionTarget, State, Altitude
 from mavros_msgs.srv import SetMode, CommandBool, CommandTOL
 from geometry_msgs.msg import PoseStamped, Twist, TwistStamped, TransformStamped
 from geographic_msgs.msg import GeoPose, GeoPoseStamped, GeoPoint
 from geometry_msgs.msg import Pose, Point, Quaternion
 from sensor_msgs.msg import NavSatFix
-from scipy.spatial.transform import Rotation as R
-import time
-import traceback
-import asyncio
-import json
-from sensor_msgs.msg import Joy
-import torch
 
 # import LyAT funcs
 from . import LyAT
 from . import data_manager
 
 class LyapunovAdaptiveTransformer(Node):
+    """ROS2 Node implementing Lyapunov Adaptive Transformer (LyAT) controller."""
+
     def __init__(self):
-        # Initialize ROS node
         super().__init__('lyapunov_adaptive_transformer')
 
         self.initialize_lyat()
+        self.init_states()
+        self.init_params()
+        self.init_topics()
+        self.init_clients()
+       
+        self.get_logger().info("Lyapunov Adaptive Transformer Node Initialized")
 
+    def init_states(self) -> None:
+        # Flight
+        self.position = np.zeros(3)
+        self.velocity = np.zeros(3)
+        self.target_position = np.zeros(3)
+        self.target_velocity = np.zeros(3)
+        self.control_input = np.zeros(3)
+        self.orientation = 0.0
+        self.quaternion = None
+        self.global_pose = NavSatFix()
+        self.altitude_amsl = -1.0
+        # Plotting
+        self.step = 1
+        # Mavros
+        self.mavros_state = None
+        self.armed = False
+        self.offboard_mode = False
+        self.takeoff_mode = False
+
+    def init_params(self) -> None:
         # Load park parameters for coordinate transforms
         self.declare_parameters(
             namespace='',
@@ -68,27 +107,7 @@ class LyapunovAdaptiveTransformer(Node):
         # Converting to quaternion
         self.q_apark_to_utm = euler_to_quaternion(0, 0, -self.origin_r) 
 
-        # State variables  
-        self.position = np.zeros(3)
-        self.velocity = np.zeros(3)
-        self.target_position = np.zeros(3)
-        self.target_velocity = np.zeros(3)
-        self.control_input = np.zeros(3)
-        self.orientation = 0.0
-        self.quaternion = None
-        self.global_pose = NavSatFix()
-        self.altitude_amsl = -1.0
-
-        # for logging/plotting
-        self.step = 1
- 
-
-        # State variables - mavros
-        self.mavros_state = None
-        self.armed = False
-        self.offboard_mode = False
-        self.takeoff_mode = False
-
+    def init_topics(self) -> None:
         # Initialize the transform broadcaster
         self.tf_broadcaster = TransformBroadcaster(self)
         
@@ -101,8 +120,8 @@ class LyapunovAdaptiveTransformer(Node):
         self.state_sub = self.create_subscription(State, 'state', self.state_callback, qos_profile=qos_profile_sensor_data)
         self.altitude_sub = self.create_subscription(Altitude, 'altitude', self.altitude_callback, qos_profile=qos_profile_sensor_data)
         self.global_pos_sub = self.create_subscription(NavSatFix, 'global_position/global', self.global_pose_callback, qos_profile=qos_profile_sensor_data)
-        # self.joy_sub = self.create_subscription(Joy, 'joy', self.joy_callback, qos_profile=qos_profile_sensor_data)
 
+    def init_clients(self) -> None:
         # Service clients
         self.arming_client = self.create_client(CommandBool, 'cmd/arming')
         while not self.arming_client.wait_for_service(timeout_sec=10.0):
@@ -116,10 +135,7 @@ class LyapunovAdaptiveTransformer(Node):
         while not self.set_mode_client.wait_for_service(timeout_sec=10.0):
             self.get_logger().info(f'service {self.set_mode_client.srv_name} not available, waiting...')
 
-       
-        self.get_logger().info("Lyapunov Adaptive Transformer Node Initialized")
-
-    def initialize_lyat(self):
+    def initialize_lyat(self) -> None:
          # Load configuration file for simulation
         with open('src/lyapunov_adaptive_transformer/lyapunov_adaptive_transformer/config.json', 'r') as config_file: config = json.load(config_file)
         self.config = config
@@ -136,7 +152,7 @@ class LyapunovAdaptiveTransformer(Node):
 
      # ==================== CALLBACK METHODS ====================
     
-    def pose_callback(self, msg):
+    def pose_callback(self, msg: PoseStamped) -> None: 
         # Pose updates (APark)
         self.position[0] = msg.pose.position.x
         self.position[1] = msg.pose.position.y
@@ -145,15 +161,15 @@ class LyapunovAdaptiveTransformer(Node):
         self.quaternion = msg.pose.orientation
         self.orientation = quat_to_yaw(msg.pose.orientation)
 
-    def global_pose_callback(self, msg):
+    def global_pose_callback(self, msg: NavSatFix) -> None:
         # Global pose updates (LLA)
         self.global_pose = msg
 
-    def altitude_callback(self, msg):
+    def altitude_callback(self, msg: Altitude) -> None:
         # Altitude update (global)
         self.altitude_amsl = msg.amsl
     
-    def velocity_callback(self, msg):
+    def velocity_callback(self, msg: TwistStamped) -> None:
         # Velocity update (body-fixed)
         vel_east = msg.twist.linear.x
         vel_north = msg.twist.linear.y
@@ -164,133 +180,59 @@ class LyapunovAdaptiveTransformer(Node):
         self.velocity[1] = math.sin(self.origin_r)*vel_east + math.cos(self.origin_r)*vel_north
         self.velocity[2] = vel_up
     
-    def state_callback(self, msg):
+    def state_callback(self, msg: State) -> None:
         # Mavros state update
         self.mavros_state = msg
         self.armed = msg.armed
         self.offboard_mode = (msg.mode == "OFFBOARD")
-        
-    # def joy_callback(self, joy_msg):
-    #     # Joy input callback
-    #     accel_x = joy_msg.axes[1]
-    #     accel_y = joy_msg.axes[0]
-    #     accel_z = joy_msg.axes[4]
 
-    #     joy_msg = PositionTarget()
-    #     joy_msg.header.stamp = self.get_clock().now().to_msg()
-    #     joy_msg.header.frame_id = "base_link"
-    #     joy_msg.coordinate_frame = PositionTarget.FRAME_BODY_NED
-        
-    #     # Set the type mask to use acceleration only
-    #     joy_msg.type_mask = PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | \
-    #                    PositionTarget.IGNORE_PZ | PositionTarget.IGNORE_VX | \
-    #                    PositionTarget.IGNORE_VY | PositionTarget.IGNORE_VZ | \
-    #                    PositionTarget.IGNORE_YAW | PositionTarget.IGNORE_YAW_RATE
+    # ============================================================ #
 
-    #     # Set acceleration values - ensure they're floats
-    #     joy_msg.acceleration_or_force.x = math.cos(self.origin_r)*accel_x + math.sin(self.origin_r)*accel_y
-    #     joy_msg.acceleration_or_force.y = -math.sin(self.origin_r)*accel_x + math.cos(self.origin_r)*accel_y
-    #     joy_msg.acceleration_or_force.z = accel_z
+    # ===================== Control Loop ========================= # 
 
-        # log to check control input
-        #self.get_logger().info(f"ax: {joy_msg.acceleration_or_force.x}, ay: {joy_msg.acceleration_or_force.y}, az: {joy_msg.acceleration_or_force.z}")
+    async def run_trajectory(self) -> None:
+        self.get_logger().info("Starting trajectory tracking...")
+        controller = LyAT.LyAT_Controller(self.config)
+        
+        traj_start_time = self.get_clock().now()
+        
+        while rclpy.ok(): 
+            try:
+                t = (self.get_clock().now() - traj_start_time).nanoseconds / 1e9     
 
-        # Uncomment to enable direct joystick control
-        #self.vel_pub.publish(joy_msg)
-        
-    def get_desired_state(self, t):
-        # Common parameters
-        height = 2.0  # meters
-        omega = 0.2  # rad/s
-        
-        # Default values
-        x_d, y_d, z_d = 0.0, 0.0, height
-        vx_d, vy_d, vz_d = 0.0, 0.0, 0.0
-        ax_d, ay_d, az_d = 0.0, 0.0, 0.0
-        
-        # Trajectory 1: Hover at point (0,0,8)
-        if self.trajectory == "point":
-            # All values are already initialized to hover
-            pass
+                if t > self.tf:
+                    self.get_logger().info(f"Reached final time of {self.tf} seconds.")
+                    break
+                
+                u = self.compute_control_input(t, controller)
+
+                # Ensure we have float values
+                vx = float(u[0])
+                vy = float(u[1])
+                vz = float(u[2])
+                
+                # Send velocity command
+                self.send_command(vx, vy, vz, yaw=None, yaw_rate=None)
+                
+
+                await self.sleep(0.01)
             
-        # Trajectory 2: Circle centered at origin
-        elif self.trajectory == "circle":
-            r = 2.5  # Radius of circle (5 meters)
-            
-            # Position
-            x_d = r * np.cos(omega * t)
-            y_d = r * np.sin(omega * t)
-            
-            # Velocity
-            vx_d = -r * omega * np.sin(omega * t)
-            vy_d = r * omega * np.cos(omega * t)
-            
-            
-        # Trajectory 3: Figure eight in x-direction
-        elif self.trajectory == "figure8":
-            a = 5.0  # Half-width of the long side (x-direction)
-            b = 2.5  # Half-width of the short side (y-direction)
-            
-            # Position (figure 8 with major axis along x)
-            x_d = a * np.sin(omega * t)
-            y_d = b * np.sin(2 * omega * t)
-            
-            # Velocity
-            vx_d = a * omega * np.cos(omega * t)
-            vy_d = 2 * b * omega * np.cos(2 * omega * t)
+            except Exception as e:
+                self.get_logger().error(f"Error in control loop: {e}")
+                self.get_logger().error(f"Error details: {type(e)}") 
 
-        
-        # Update states
-        self.target_position[0] = x_d
-        self.target_position[1] = y_d
-        self.target_position[2] = z_d
-        self.target_velocity[0] = vx_d
-        self.target_velocity[1] = vy_d
-        self.target_velocity[2] = vz_d
-
-        # Broadcast tf for rViz
-        tf = TransformStamped()
-        # Set the timestamp and frame IDs
-        tf.header.stamp = self.get_clock().now().to_msg()
-        tf.header.frame_id = "autonomy_park"  # Parent frame
-        tf.child_frame_id = "target_position"  # Child frame
-        
-        # Set the translation (position)
-        tf.transform.translation.x = x_d
-        tf.transform.translation.y = y_d
-        tf.transform.translation.z = height
-        
-        # Set the rotation (identity quaternion if no specific orientation)
-        tf.transform.rotation.x = 0.0
-        tf.transform.rotation.y = 0.0
-        tf.transform.rotation.z = 0.0
-        tf.transform.rotation.w = 1.0
-    
-        # Send the transform
-        self.tf_broadcaster.sendTransform(tf)
-
-        return (np.array([x_d, y_d, z_d]), 
-                np.array([vx_d, vy_d, vz_d]), 
-                np.array([ax_d, ay_d, az_d]))
-
-    
-    def compute_control_input(self, t, controller):
+    def compute_control_input(self, t: float, controller: LyAT.LyAT_Controller) -> torch.Tensor:
         x = torch.tensor([self.position[0], self.position[1], self.position[2],
-                                        self.velocity[0], self.velocity[1], self.velocity[2]],
-                                    dtype=torch.float32)
+                            self.velocity[0], self.velocity[1], self.velocity[2]],
+                            dtype=torch.float32)
 
-        # Convert t to tensor before using it
+        # Convert t to tensor 
         t_tensor = torch.tensor(t, dtype=torch.float32)
         self.get_logger().info(f"Time: {t_tensor.item()}")
         xd, xd_dot = LyAT.Dynamics.desired_trajectory(t_tensor)
         u, Phi = controller.parameter_adaptation(x, t_tensor)
         theta = torch.cat([p.view(-1) for p in controller.transformer.parameters()])
         data_manager.save_theta_to_csv(self.step, t, theta.detach().cpu().numpy())
-
-        # DEBUG
-        #self.get_logger().info(f'pose: {self.position[0]}, {self.position[1]}, {self.position[2]}')
-        #self.get_logger().info(f'vel: {self.velocity[0]}, {self.velocity[1]}, {self.velocity[2]}')
-        #self.get_logger().info(f'control_intput: {u[0]}, {u[1]}, {u[2]}')
 
         # Data Storage
         data_manager.save_state_to_csv(
@@ -302,74 +244,43 @@ class LyapunovAdaptiveTransformer(Node):
         )
         self.step = self.step + 0.01
 
-        # Broadcast tf for rViz
+        # Construct and broadcast TF2 for desired trajectory 
         tf = TransformStamped()
-        # Set the timestamp and frame IDs
         tf.header.stamp = self.get_clock().now().to_msg()
         tf.header.frame_id = "autonomy_park"  # Parent frame
         tf.child_frame_id = "target_position"  # Child frame
-        
-        # Set the translation (position)
         tf.transform.translation.x = xd[0].item()
         tf.transform.translation.y = xd[1].item()
         tf.transform.translation.z = xd[2].item()
-        
-        # Set the rotation (identity quaternion if no specific orientation)
         tf.transform.rotation.x = 0.0
         tf.transform.rotation.y = 0.0
         tf.transform.rotation.z = 0.0
         tf.transform.rotation.w = 1.0
-    
-        # Send the transform
         self.tf_broadcaster.sendTransform(tf)
         
         return u
        
+    def send_command(self, vel_x: float, vel_y: float, vel_z: float, yaw: Optional[float] = None, yaw_rate: Optional[float] = None) -> None:
+        """Send velocity command to PX4"""
 
-    def send_command(self, vel_x, vel_y, vel_z, yaw=None, yaw_rate=None):
-        """Send velocity and attitude command to PX4"""
-        # msg = PositionTarget()
-        # msg.header.stamp = self.get_clock().now().to_msg()
-        # msg.header.frame_id = "base_link"
-        # msg.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
-        
-        # # Determine which commands to ignore based on what's provided
-        # msg.type_mask = PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | \
-        #             PositionTarget.IGNORE_PZ | PositionTarget.IGNORE_AFX | \
-        #             PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ
-        
-        # # Add yaw control if provided
-        # if yaw is not None:
-        #     msg.yaw = yaw + self.origin_r
-        #     msg.type_mask |= PositionTarget.IGNORE_YAW_RATE
-        # elif yaw_rate is not None:
-        #     msg.yaw_rate = yaw_rate
-        #     msg.type_mask |= PositionTarget.IGNORE_YAW
-        # else:
-        #     # If neither yaw nor yaw_rate provided, ignore both
-        #     msg.type_mask |= PositionTarget.IGNORE_YAW | PositionTarget.IGNORE_YAW_RATE
-        
-        # # Set velocity values - ensure they're floats
-        # vel_enu_x = math.cos(self.origin_r)*vel_x + math.sin(self.origin_r)*vel_y
-        # vel_enu_y = -math.sin(self.origin_r)*vel_x + math.cos(self.origin_r)*vel_y
-        
-        # # Saturate acceleration
-        # msg.velocity.x, msg.velocity.y, msg.velocity.z = saturate_vector(vel_enu_x, vel_enu_y, vel_z, 2.0)
-        
-        # # log to check control input
-        # #self.get_logger().info(f"ax: {msg.acceleration_or_force.x}, ay: {msg.acceleration_or_force.y}, az: {msg.acceleration_or_force.z}")
-        
-        
-        # self.vel_pub.publish(msg)
+        # rotate from park frame to enu
+        vx = math.cos(self.origin_r)*vel_x + math.sin(self.origin_r)*vel_y
+        vy = -math.sin(self.origin_r)*vel_x + math.cos(self.origin_r)*vel_y
+
         cmdvel = TwistStamped()
         cmdvel.header.stamp = self.get_clock().now().to_msg()
         cmdvel.header.frame_id = "base_link"
-        vx = math.cos(self.origin_r)*vel_x + math.sin(self.origin_r)*vel_y
-        vy = -math.sin(self.origin_r)*vel_x + math.cos(self.origin_r)*vel_y
+
+        # saturate cmd velocity preserving direction to limit quadcopter speed
         cmdvel.twist.linear.x, cmdvel.twist.linear.y, cmdvel.twist.linear.z = saturate_vector(vx, vy, vel_z, self.VEL_MAX)
         cmdvel.twist.angular.z = 0.0
+
         self.vel_pub.publish(cmdvel)
         
+    # ============================================================ #
+
+    # ===================== Client Calls ========================= # 
+
     async def arm(self):
         """Arm the vehicle"""
 
@@ -395,6 +306,7 @@ class LyapunovAdaptiveTransformer(Node):
     
     async def set_offboard(self):
         """Set to offboard mode"""
+
         # Send a few setpoints before starting
         for i in range(100):
             self.send_command(0.0, 0.0, 0.0, 0.0, 0.0)
@@ -422,7 +334,7 @@ class LyapunovAdaptiveTransformer(Node):
             self.send_command(0.0, 0.0, 0.0, 0.0, 0.0)  # Send neutral commands while waiting
             await self.sleep(0.05)
     
-    async def takeoff(self, height):
+    async def takeoff(self, height: float):
         """Simple takeoff procedure"""
         last_request_time = self.get_clock().now()
         
@@ -460,38 +372,8 @@ class LyapunovAdaptiveTransformer(Node):
 
         self.get_logger().info("Finished Taking off")
     
-    async def run_trajectory(self):
-        self.get_logger().info("Starting trajectory tracking...")
-        controller = LyAT.LyAT_Controller(self.config)
-        
-        traj_start_time = self.get_clock().now()
-        
-        while rclpy.ok(): 
-            try:
-                t = (self.get_clock().now() - traj_start_time).nanoseconds / 1e9     
 
-                if t > self.tf:
-                    self.get_logger().info(f"Reached final time of {self.tf} seconds.")
-                    break
-                
-                u = self.compute_control_input(t, controller)
-
-                # Ensure we have float values
-                vx = float(u[0])
-                vy = float(u[1])
-                vz = float(u[2])
-                
-                # Send velocity command
-                self.send_command(vx, vy, vz, yaw=None, yaw_rate=None)
-                
-
-                await self.sleep(0.01)
-            
-            except Exception as e:
-                self.get_logger().error(f"Error in control loop: {e}")
-                self.get_logger().error(f"Error details: {type(e)}") 
-
-    async def return_home(self):
+    async def return_home(self) -> None:
         # create velocity setpoint msg
         setpoint_vel = TwistStamped()
         setpoint_vel.header.stamp = self.get_clock().now().to_msg()
@@ -537,7 +419,11 @@ class LyapunovAdaptiveTransformer(Node):
             
         self.get_logger().info("Landing complete")
     
-    async def sleep(self, seconds):
+    # ============================================================ #
+
+
+    # ============================================================ #
+    async def sleep(self, seconds: float) -> None:
         """Sleep while still processing callbacks"""
         start = self.get_clock().now()
         while rclpy.ok():
@@ -551,7 +437,7 @@ class LyapunovAdaptiveTransformer(Node):
             rclpy.spin_once(self, timeout_sec=0.01)
         return future.result()
     
-    async def run_mission(self):
+    async def run_mission(self) -> None:
         """Run the complete mission"""
         try:
                 # Arm first
@@ -590,7 +476,7 @@ class LyapunovAdaptiveTransformer(Node):
                 self.print_results()
 
 
-    def apark_to_global(self, apark_pose):
+    def apark_to_global(self, apark_pose: Pose) -> GeoPose:
         # Autonomy park setpoint coordinates
         sp_x = apark_pose.position.x
         sp_y = apark_pose.position.y
@@ -626,7 +512,7 @@ class LyapunovAdaptiveTransformer(Node):
         
         return global_pose
 
-    def print_results(self):
+    def print_results(self) -> None:
         state_data = pd.read_csv('src/lyapunov_adaptive_transformer/simulation_data/state_data.csv')
         target_state_data = pd.read_csv('src/lyapunov_adaptive_transformer/simulation_data/target_state_data.csv')
         time_array = target_state_data['Time']
@@ -639,7 +525,7 @@ class LyapunovAdaptiveTransformer(Node):
         if self.INCLUDE_PLOTS:
             data_manager.plot_from_csv()
 
-def saturate_vector(vec_x, vec_y, vec_z, max_magnitude):
+def saturate_vector(vec_x: float, vec_y: float, vec_z: float, max_magnitude: float) -> Tuple[float, float, float]:
     """
     Saturate a 3D vector while preserving its direction.
     
@@ -662,13 +548,13 @@ def saturate_vector(vec_x, vec_y, vec_z, max_magnitude):
     else:
         return (vec_x, vec_y, vec_z)
 
-def quat_to_yaw(quat):
+def quat_to_yaw(quat: Quaternion) -> float:
     siny_cosp = 2 * (quat.w * quat.z + quat.x * quat.y)
     cosy_cosp = 1 - 2 * (quat.y * quat.y + quat.z * quat.z)
     yaw = math.atan2(siny_cosp, cosy_cosp)
     return yaw
 
-def multiply_quaternions(q1, q2):
+def multiply_quaternions(q1: Quaternion, q2: Quaternion) -> Quaternion:
     """Multiply two geometry_msgs.msg.Quaternion quaternions in ROS2."""
     # Convert ROS2 Quaternions to scipy Rotation objects
     r2 = R.from_quat([q2.x, q2.y, q2.z, q2.w])
