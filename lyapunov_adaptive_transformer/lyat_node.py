@@ -2,9 +2,9 @@
 """
 Lyapunov Adaptive Transformer ROS2 Node
 
-This node implements a Lyapunov-based adaptive transformer controller for
-quadcopter trajectory tracking. It interfaces with MAVROS to control
-a PX4-based autopilot system.
+This node implements a Lyapunov-based adaptive transformer controller developed
+by Saiadeh Akbari for quadcopter trajectory tracking. It interfaces with MAVROS to
+control PX4-Autopilot.
 
 Author: Jordan Insinger
 """
