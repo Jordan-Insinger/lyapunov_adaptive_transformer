@@ -55,6 +55,28 @@ def save_state_to_csv(step, time, agent_position, target_position, control_input
     else:
         target_state_data.to_csv(target_file_path, mode='a', header=False, index=False)
 
+def save_theta_to_csv(step, time, theta):
+    ensure_directory_exists('src/lyapunov_adaptive_transformer/simulation_data')
+
+    state_data = pd.DataFrame({
+        'Step': [step],
+        'Time': [time],
+        **{f'Theta{i+1}': [theta[i]] for i in range(len(theta))}
+    })
+
+    # Construct the file path using the new ID
+    state_file_path = f'src/lyapunov_adaptive_transformer/simulation_data/theta_data.csv'
+
+    if step == 1:
+        # If file exists, remove it so a fresh CSV is created
+        if os.path.exists(state_file_path):
+            os.remove(state_file_path)
+        # Write header on the first write
+        state_data.to_csv(state_file_path, index=False, header=True)
+    else:
+        # Append subsequent data
+        state_data.to_csv(state_file_path, mode='a', header=False, index=False)
+
 
 # Constants for IEEE standard plotting
 IEEE_FIGSIZE = (10, 8)
@@ -69,6 +91,7 @@ def plot_from_csv():
     state_data = pd.read_csv('src/lyapunov_adaptive_transformer/simulation_data/state_data.csv')
     target_state_data = pd.read_csv('src/lyapunov_adaptive_transformer/simulation_data/target_state_data.csv')
     time_array = target_state_data['Time']
+    theta_data = pd.read_csv('src/lyapunov_adaptive_transformer/simulation_data/theta_data.csv')
     
     # Read nn_state_data file
     #_________________________________________________________________________________________________________________________________ 
@@ -80,6 +103,18 @@ def plot_from_csv():
     print(f'Mean RMS Tracking Error: {rms_tracking_error} m')
     plt.xlabel('Time (s)')
     plt.ylabel('Tracking Error Norm $(m)$')
+    plt.legend(loc='best', fontsize=IEEE_FONTSIZE, frameon=True)
+    plt.grid(**IEEE_GRID_STYLE)
+    plt.tight_layout()
+    #_________________________________________________________________________________________________________________________________ 
+    # Plot tracking error over time
+    plt.figure(figsize=IEEE_FIGSIZE)
+    weight_columns = [col for col in theta_data.columns if col.startswith('Theta')]
+    for col in weight_columns:
+        plt.plot(time_array.to_numpy(), theta_data[col].to_numpy(), label=col)
+
+    plt.xlabel('Time (s)')
+    plt.ylabel('theta')
     plt.legend(loc='best', fontsize=IEEE_FONTSIZE, frameon=True)
     plt.grid(**IEEE_GRID_STYLE)
     plt.tight_layout()

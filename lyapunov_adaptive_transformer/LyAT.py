@@ -6,14 +6,7 @@ import math
 import json
 import os
 import rclpy
-import logging
 
-# Initialize logging
-logging.basicConfig(
-    filename='debug.log',
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
 
 # ================== Dynamical System ====================== #
 class Dynamics:
@@ -38,9 +31,9 @@ class Dynamics:
     
     @staticmethod
     def diffusion_matrix (x):
-        x1, x2, x3, x4, x5 = x
+        x1, x2, x3, x4, x5, x6 = x
 
-        g2 = torch.zeros(5, 2)
+        g2 = torch.zeros(6, 2)
 
         g2[0,0] = x1 * torch.cos(x2)
         g2[0,1] = 1 - x3 * torch.cos(x4)
@@ -51,7 +44,10 @@ class Dynamics:
         g2[3,0] = (x1 + x2) ** 3 - torch.sin(x3)
         g2[3,1] = 1 - x3 ** 2
         g2[4,0] = x2 * torch.sin(x3) ** 2
-        g2[4,1] = - x5 + x1 * x4 ** 2 
+        g2[4,1] = - x5 + x1 * x4 ** 2
+        g2[5,0] = torch.cos(x6)
+        g2[5,1] = x6 ** 2 + x1 * x2
+
 
         return g2
     
@@ -64,11 +60,9 @@ class Dynamics:
     
     @staticmethod
     def desired_trajectory(t):
-        a = 5.0  # meters
-        b = 2.5  # meters
-        r = 2.5  # radius in meters
         height = 2.5  # meters
-        omega = 0.2  # rad/s
+        omega = 0.15  # rad/s
+        r = 2.5
         
         # # desired position (figure 8)
         # xd1 = a * torch.sin(omega * t)
@@ -85,20 +79,23 @@ class Dynamics:
         # xd5_dot = -4 * b * omega**2 * torch.sin(2 * omega * t)
         # xd6_dot = torch.tensor(0.0, dtype=torch.float32)  # Convert to tensor
 
-        xd1 = r * torch.cos(omega * t)
-        xd2 = r * torch.sin(omega * t)
-        xd3 = torch.tensor(height, dtype=torch.float32)
-
-        # desired velocity
-        xd4 = -r * omega * torch.sin(omega * t)
-        xd5 = r * omega * torch.cos(omega * t)
-        xd6 = torch.tensor(0.0, dtype=torch.float32)
-
-        # desired acceleration
-        xd4_dot = -r * omega**2 * torch.cos(omega * t)
-        xd5_dot = -r * omega**2 * torch.sin(omega * t)
-        xd6_dot = torch.tensor(0.0, dtype=torch.float32)
+        z_tilt = 0.0 
+        a = 7.5  # Half-width of the long side (x-direction)
+        b = 3.0  # Half-width of the short side (y-direction)
         
+        # Position (figure 8 with major axis along x)
+        xd1 = a * torch.sin(omega * t)
+        xd2 = b * torch.sin(2.0 * omega * t)
+        xd3 = torch.tensor(height, dtype=torch.float32) + (z_tilt / 2) * torch.sin(omega * t)
+        # Velocity
+        xd4 = a * omega * torch.cos(omega * t)
+        xd5 = 2 * b * omega * torch.cos(2.0 * omega * t)
+        xd6 = (z_tilt / 2) * omega * torch.cos(omega * t)
+
+        xd4_dot = -a * omega**2 * torch.sin(omega * t)
+        xd5_dot = -4 * b * omega**2 * torch.sin(2.0 * omega * t)
+        xd6_dot = -(z_tilt / 2) * omega**2 * torch.sin(omega * t)
+
         xd = torch.stack([xd1, xd2, xd3, xd4, xd5, xd6])
         xd_dot = torch.stack([xd4, xd5, xd6, xd4_dot, xd5_dot, xd6_dot])
         
@@ -276,6 +273,7 @@ class LyAT (nn.Module):
         self._initialize_weights()
 
     def _initialize_weights (self):
+        torch.manual_seed (0)
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p, gain=0.01)
@@ -335,20 +333,20 @@ class LyAT_Controller:
         self.transformer = LyAT (
             n_states = self.n_states,            
             window_size = self.window_size,
-            num_encoder_layers = config.get('num_encoder_layers', 2),
-            num_decoder_layers = config.get('num_decoder_layers', 2),
-            num_heads = config.get('num_heads', 5),
-            d_ff = config.get('d_ff', 128),
-            gamma_encoder_attn = config.get('gamma_encoder_attn', 1.0),
-            beta_encoder_attn = config.get('beta_encoder_attn', 0.0),
-            gamma_encoder_ff = config.get('gamma_encoder_ff', 1.0),
-            beta_encoder_ff = config.get('beta_encoder_ff', 0.0),
-            gamma_decoder_self = config.get('gamma_decoder_self', 1.0),
-            beta_decoder_self = config.get('beta_decoder_self', 0.0),
-            gamma_decoder_cross = config.get('gamma_decoder_cross', 1.0),
-            beta_decoder_cross = config.get('beta_decoder_cross', 0.0),
-            gamma_decoder_ff = config.get('gamma_decoder_ff', 1.0),
-            beta_decoder_ff = config.get('beta_decoder_ff', 0.0)
+            num_encoder_layers = config.get('num_encoder_layers'),
+            num_decoder_layers = config.get('num_decoder_layers'),
+            num_heads = config.get('num_heads'),
+            d_ff = config.get('d_ff'),
+            gamma_encoder_attn = config.get('gamma_encoder_attn'),
+            beta_encoder_attn = config.get('beta_encoder_attn'),
+            gamma_encoder_ff = config.get('gamma_encoder_ff'),
+            beta_encoder_ff = config.get('beta_encoder_ff'),
+            gamma_decoder_self = config.get('gamma_decoder_self'),
+            beta_decoder_self = config.get('beta_decoder_self'),
+            gamma_decoder_cross = config.get('gamma_decoder_cross'),
+            beta_decoder_cross = config.get('beta_decoder_cross'),
+            gamma_decoder_ff = config.get('gamma_decoder_ff'),
+            beta_decoder_ff = config.get('beta_decoder_ff')
         )
 
         n_parameters = self.transformer.count_parameters()
@@ -374,7 +372,7 @@ class LyAT_Controller:
 
     def build_encoder_input (self):
         n_history = len(self.state_history)
-
+        torch.manual_seed(0)
         if n_history < self.window_size:
             pad_size = self.window_size - n_history
             x_pad = [torch.randn(self.n_states) * 0.1 for _ in range(pad_size)] + self.state_history
@@ -395,7 +393,7 @@ class LyAT_Controller:
     
     def build_decoder_input (self):
         n_history = len(self.Phi_history)
-
+        torch.manual_seed(0)
         if n_history < self.window_size:
             pad_size = self.window_size - n_history
             Phi_pad = [torch.randn(self.n_states) * 0.1 for _ in range(pad_size)] + self.Phi_history
@@ -440,8 +438,6 @@ class LyAT_Controller:
 
     def parameter_adaptation (self, x, t):
         xd, xd_dot = Dynamics.desired_trajectory (torch.tensor(t, dtype = torch.float32))
-        # logging.debug(f"X: {x.shape}")
-        # logging.debug(f"Xd: {xd.shape}")
 
         e = x - xd
 
@@ -456,18 +452,7 @@ class LyAT_Controller:
 
         theta = torch.cat([p.view(-1) for p in self.transformer.parameters()])
 
-        # Log intermediate values for debugging
-    
-        # logging.debug(f"Jacobian shape: {jacobian.shape}")
-        logging.debug(f"Error vector (e): {e}")
-        # logging.debug(f"Theta: {theta.shape}")
-        # logging.debug(f"Gamma: {self.Gamma.shape}")
-        # logging.debug(f"Sigma: {self.sigma}")
-
         projected_term = self.Gamma @ (jacobian.T @ e - self.sigma * theta)
-
-        # Log the projected_term for debugging
-        logging.debug(f"Projected term: {projected_term}")
 
         projected = smooth_projection (projected_term, theta, self.theta_bar)
 
@@ -488,9 +473,6 @@ class LyAT_Controller:
         g1 = Dynamics.control_effectiveness()
         g1_inv = torch.inverse(g1) 
 
-        # logging.debug(f"g1_inv: {g1_inv.shape}")
-        # logging.debug(f"xd_dot: {xd_dot.shape}")
-        # logging.debug(f"other terms: {(self.ke * e - Phi).shape}")
         u = g1_inv @ (xd_dot - self.ke * e - Phi)
         
         self.update_history(x, xd, e, Phi)
@@ -601,30 +583,6 @@ def main ():
     torch.manual_seed(42)
     np.random.seed(42)
     with open('lyapunov_adaptive_transformer/lyapunov_adaptive_transformer/config.json', 'r') as config_file: config = json.load(config_file)
-    # config = {
-    #     "n_states": 5,
-    #     "window_size": 10,
-    #     "T_final": 10.0,
-    #     "dt": 0.005,
-    #     "ke": 100.0,
-    #     "gamma": 1,
-    #     "sigma": 0.001,
-    #     "theta_bar": 100.0,
-    #     "num_encoder_layers": 2,
-    #     "num_decoder_layers": 2,
-    #     "num_heads": 5,
-    #     "d_ff": 128,
-    #     "gamma_encoder_attn": 1.0,
-    #     "beta_encoder_attn": 0.0,
-    #     "gamma_encoder_ff": 1.0,
-    #     "beta_encoder_ff": 0.0,
-    #     "gamma_decoder_self": 1.0,
-    #     "beta_decoder_self": 0.0,
-    #     "gamma_decoder_cross": 1.0,
-    #     "beta_decoder_cross": 0.0,
-    #     "gamma_decoder_ff": 1.0,
-    #     "beta_decoder_ff": 0.0
-    # }
 
     # Save config
     with open('config_LyAT.json', 'w') as f:
