@@ -118,6 +118,6 @@ Achieved 0.21 m RMS tracking error on figure eight trajectory:
 
 This work was developed at the Nonlinear Control and Robotics Lab, University of Florida. Special thanks to:
 - Dr. Warren Dixon (Advisor)
-- Saia Akbari (Wrote the paper)  
+- Saia Akbari (Wrote the transformer)  
 
 ---
